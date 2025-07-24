@@ -59,7 +59,7 @@ public class IEModelConverterEditor : Editor
         FunctionalTensor boxOutput = originalOutputs[0];
         FunctionalTensor maskWeightsOutput = originalOutputs[1];
 
-        // Pull out the box coordinates, class scores and mask weights forom output0
+        // Pull out the box coordinates, class scores and mask weights from output0
         FunctionalTensor allBoxCoords = boxOutput[0, ..4, ..].Transpose(0, 1);
         FunctionalTensor allScores = boxOutput[0, 4..84, ..].Transpose(0, 1);
         FunctionalTensor allMasks = boxOutput[0, 84.., ..].Transpose(0, 1);

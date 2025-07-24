@@ -16,3 +16,8 @@ https://www.kaggle.com/datasets/sarkisshilgevorkyan/coco-dataset-for-yolo
 ## XR Scene
 
 The XR scene must be built and deployed to a headset.
+
+## License
+
+This project is licensed under the terms of the GNU Affero General Public License v3.0 (AGPL‑3.0).  
+See the [LICENSE](./LICENSE) file for details.
