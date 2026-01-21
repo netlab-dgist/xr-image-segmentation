@@ -1171,7 +1171,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   _onnxModel: {fileID: 5022602860645237092, guid: 3f6df67c79fabff4186394a52b25ec66, type: 3}
   _iouThreshold: 0.6
-  _scoreThreshold: 0.23
+  _scoreThreshold: 0.304
 --- !u!1 &787607877
 GameObject:
   m_ObjectHideFlags: 0
@@ -1221,8 +1221,12 @@ MonoBehaviour:
   _sentisModel: {fileID: 5022602860645237092, guid: f1c063a466db58649b6fc7b9aa20b30b, type: 3}
   _layersPerFrame: 25
   _confidenceThreshold: 0.5
-  _labelsAsset: {fileID: 4900000, guid: e167eeec84823644ba126ce551ac7852, type: 3}
   _displayLocation: {fileID: 270828331}
+  _maxLostFrames: 10
+  _minIoUThreshold: 0.2
+  _minSmoothTime: 0.03
+  _maxSmoothTime: 0.2
+  _sizeSmoothTime: 0.3
   _ieBoxer: {fileID: 568621722}
 --- !u!1 &832575517
 GameObject:
@@ -1512,6 +1516,9 @@ MonoBehaviour:
   _webCamTextureManager: {fileID: 1675638408}
   _outputImage: {fileID: 270828332}
   _ieExecutor: {fileID: 787607880}
+  _cameraRig: {fileID: 700560615}
+  _laserLineRenderer: {fileID: 0}
+  _laserLength: 3
 --- !u!1 &1230766267
 GameObject:
   m_ObjectHideFlags: 0

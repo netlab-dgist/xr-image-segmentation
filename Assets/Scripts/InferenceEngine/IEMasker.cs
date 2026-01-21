@@ -38,13 +38,11 @@ public class IEMasker
             {
                 for (int x = 0; x < YOLO11_MASK_WIDTH; x++)
                 {
-                    // Get the probability value at the current pixel
                     float value = mask[i, y, x];
 
                     int posX = x;
                     int posY = YOLO11_MASK_HEIGHT - y - 1;
 
-                    // If the value is greater than confidenceThreshold and is inside the box, draw the pixel
                     if (value > _confidenceThreshold && PixelInBoundingBox(boundBoxes[i], posX, posY, imageWidth, imageHeight))
                     {
                         pixelArray[posY * YOLO11_MASK_WIDTH + posX] = GetColor(i);
@@ -55,64 +53,68 @@ public class IEMasker
                     }
                 }
             }
-            // DebugDrawBoundingBox(maskTexture, boundBoxes[i], Color.black, (int)imageWidth, (int)imageHeight);
             maskTexture.SetPixels32(pixelArray);
             maskTexture.Apply();
         }
         ClearMasks(numObjects);
     }
 
+    // [수정됨] 에러가 났던 부분입니다. 네임스페이스를 제거하여 정상 작동하도록 고쳤습니다.
+    public void DrawSingleMask(int targetIndex, BoundingBox box, Tensor<float> mask, int imageWidth, int imageHeight)
+    {
+        ClearMasks(0); 
+
+        if (targetIndex < 0 || targetIndex >= mask.shape[0]) return;
+
+        Texture2D maskTexture = GetTexture(0, imageWidth, imageHeight);
+        
+        int maskW = YOLO11_MASK_WIDTH; 
+        int maskH = YOLO11_MASK_HEIGHT;
+        
+        Color32[] pixelArray = new Color32[maskW * maskH];
+
+        for (int y = 0; y < maskH; y++)
+        {
+            for (int x = 0; x < maskW; x++)
+            {
+                float value = mask[targetIndex, y, x];
+                int posX = x;
+                int posY = maskH - y - 1;
+
+                if (value > _confidenceThreshold && PixelInBoundingBox(box, posX, posY, imageWidth, imageHeight))
+                {
+                    pixelArray[posY * maskW + posX] = new Color(0, 1, 0, 0.6f); 
+                }
+                else
+                {
+                    pixelArray[posY * maskW + posX] = Color.clear;
+                }
+            }
+        }
+
+        maskTexture.SetPixels32(pixelArray);
+        maskTexture.Apply();
+    }
+
     private void ClearMasks(int lastBoxCount)
     {
-        // Disable all mask images that are not needed
         for (int i = lastBoxCount; i < _maskImages.Count; i++)
         {
             _maskImages[i].gameObject.SetActive(false);
         }
     }
 
-    private void DebugDrawBoundingBox(Texture2D maskTexture, BoundingBox box, Color color, int imageWidth, int imageHeight)
-    {
-        // Scale factor to reduce the bounding box size
-        float xScaleFactor = YOLO11_MASK_WIDTH / (float)imageWidth;
-        float yScaleFactor = YOLO11_MASK_HEIGHT / (float)imageHeight;
-
-        // Convert bounding box center from middle-origin to top-left origin and apply scaling factor
-        int centerX = Mathf.RoundToInt(box.CenterX * xScaleFactor) + YOLO11_MASK_WIDTH / 2;
-        int centerY = Mathf.RoundToInt(YOLO11_MASK_HEIGHT / 2 - (box.CenterY * yScaleFactor));  // Invert Y coordinate
-
-        // Calculate dimensions of the scaled bounding box
-        int width = Mathf.RoundToInt(box.Width * xScaleFactor);
-        int height = Mathf.RoundToInt(box.Height * yScaleFactor);
-
-        // Draw the bounding box on the mask texture
-        for (int x = centerX - width / 2; x <= centerX + width / 2; x++)
-        {
-            DrawPixel(maskTexture, x, centerY - height / 2, color); // Top edge
-            DrawPixel(maskTexture, x, centerY + height / 2, color); // Bottom edge
-        }
-        for (int y = centerY - height / 2; y <= centerY + height / 2; y++)
-        {
-            DrawPixel(maskTexture, centerX - width / 2, y, color); // Left edge
-            DrawPixel(maskTexture, centerX + width / 2, y, color); // Right edge
-        }
-    }
-
     private bool PixelInBoundingBox(BoundingBox box, int x, int y, int imageWidth, int imageHeight)
     {
-        // Scale factor to reduce the bounding box size
         float xScaleFactor = YOLO11_MASK_WIDTH / (float)imageWidth;
         float yScaleFactor = YOLO11_MASK_HEIGHT / (float)imageHeight;
 
-        // Convert bounding box center from middle-origin to top-left origin and apply scaling factor
         float centerX = (box.CenterX * xScaleFactor) + (YOLO11_MASK_WIDTH / 2);
-        float centerY = (YOLO11_MASK_HEIGHT / 2) - (box.CenterY * yScaleFactor); // Invert Y coordinate
+        float centerY = (YOLO11_MASK_HEIGHT / 2) - (box.CenterY * yScaleFactor);
 
-        // Calculate half-dimensions of the scaled bounding box
         float halfWidth = box.Width * xScaleFactor / 2;
         float halfHeight = box.Height * yScaleFactor / 2;
 
-        // Check if pixel is within the bounding box boundaries
         return x >= (centerX - halfWidth) &&
                x <= (centerX + halfWidth) &&
                y >= (centerY - halfHeight) &&
@@ -177,9 +179,7 @@ public class IEMasker
 
     private void DrawPixel(Texture2D maskTexture, int x, int y, Color color)
     {
-        // Ensure coordinates are within bounds
         if (x < 0 || x >= maskTexture.width || y < 0 || y >= maskTexture.height) return;
-
         maskTexture.SetPixel(x, y, color);
     }
 }
