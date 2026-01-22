@@ -5,6 +5,7 @@ using Unity.InferenceEngine;
 using UnityEngine;
 using UnityEngine.Rendering;
 using Meta.XR.EnvironmentDepth;
+using PassthroughCameraSamples;
 
 public class IEExecutor : MonoBehaviour
 {
@@ -23,23 +24,18 @@ public class IEExecutor : MonoBehaviour
     [SerializeField] private BackendType _backend = BackendType.GPUCompute;
     [SerializeField] private ModelAsset _sentisModel;
     [SerializeField] private int _layersPerFrame = 12;
-    [SerializeField] private float _confidenceThreshold = 0.5f;
+    [SerializeField] private float _confidenceThreshold = 0.4f;
     [SerializeField] private Transform _displayLocation;
 
-    [Header("Natural Tracking Settings")]
-    [SerializeField] private int _maxLostFrames = 15;
-    [SerializeField] private float _minIoUThreshold = 0.3f;
-    [SerializeField] private float _minSmoothTime = 0.03f;
-    [SerializeField] private float _maxSmoothTime = 0.2f;
-    [SerializeField] private float _sizeSmoothTime = 0.3f;
+    [Header("Stabilization Settings")]
+    [Tooltip("트래킹 실패 시에도 이전 형상을 유지할 시간 (초)")]
+    [SerializeField] private float _keepAliveDuration = 1.0f;
+    private float _lastValidTime = 0f;
 
-    [Header("RGB-D & Depth Settings")]
+    [Header("Depth Settings")]
     [SerializeField] private EnvironmentDepthManager _depthManager;
-    [SerializeField] private PassthroughCameraSamples.WebCamTextureManager _webCamManager;
-    [SerializeField] private bool _captureRGBD = true;
     [SerializeField] private int _maxPoints = 8000;
-
-    [Header("Optimization Settings")]
+    [SerializeField] private Gradient _depthGradient; 
     [Range(2, 8)]
     [SerializeField] private int _samplingStep = 4;
 
@@ -47,69 +43,66 @@ public class IEExecutor : MonoBehaviour
         public Vector3 worldPos;
         public Color32 color;
     }
-    public RGBDPoint[] PointBuffer;
-    public int CurrentPointCount { get; private set; }
 
-    public bool IsModelLoaded { get; private set; } = false;
+    // 이중 버퍼: 현재 프레임용 / 렌더링용(안전한 데이터)
+    public RGBDPoint[] PointBuffer; 
+    public int CurrentPointCount { get; private set; } = 0;
+
+    private RGBDPoint[] _backupBuffer;
+    private int _backupCount = 0;
 
     [SerializeField] private IEBoxer _ieBoxer;
     [SerializeField] private IEMasker _ieMasker;
     private Worker _inferenceEngineWorker;
     private IEnumerator _schedule;
     private InferenceDownloadState _downloadState = InferenceDownloadState.Running;
-
     private Tensor<float> _input;
+    private bool _started = false;
 
-    // [최적화] 병렬 Readback을 위한 버퍼 배열
+    // Readback 관련
     private readonly Tensor[] _outputBuffers = new Tensor[4];
     private readonly bool[] _readbackComplete = new bool[4];
+    private bool _readbacksInitiated = false;
     private Tensor<float> _output0BoxCoords;
     private Tensor<int> _output1LabelIds;
     private Tensor<float> _output2Masks;
     private Tensor<float> _output3MaskWeights;
 
+    // Depth 관련
     private Texture2D _cpuDepthTex;
     private bool _isDepthReadingBack = false;
-
-    // [최적화] RGB 비동기 읽기를 위한 변수들
-    private Color32[] _rgbPixelCache;
-    private RenderTexture _rgbRenderTexture;
-    private Texture2D _rgbCpuTexture;
-    private bool _isRgbReadingBack = false;
-    private bool _rgbDataReady = false;
-
-    // [최적화] 카메라 intrinsics 캐싱 (한 번만 로드)
-    private PassthroughCameraSamples.PassthroughCameraIntrinsics _cachedIntrinsics;
+    private PassthroughCameraIntrinsics _cachedIntrinsics;
     private bool _intrinsicsCached = false;
 
-    private BoundingBox? _lockedTargetBox = null;
-    private bool _isTracking = false;
-    private int _consecutiveLostFrames = 0;
+    // [에러 해결 1] 외부 스크립트 호환용 프로퍼티 복구
+    public bool IsModelLoaded { get; private set; } = false;
+    
+    // [에러 해결 2] Trigger 스크립트가 참조하는 IsTracking
+    // 자동 모드이므로 항상 true로 두거나, 모델이 실행 중이면 true로 반환
+    public bool IsTracking => _started; 
 
-    private Vector2 _centerVelocity;
-    private Vector2 _sizeVelocity;
-    private float _currentSmoothTime;
-
-    private bool _started = false;
-    private bool _readbacksInitiated = false;
-    private readonly List<BoundingBox> _currentFrameBoxes = new();
-
-    // IEDepthManager 등 외부에서 접근하는 프로퍼티
-    public bool IsTracking => _isTracking;
-    public BoundingBox? LockedTargetBox => _lockedTargetBox;
+    // [에러 해결 3] 외부에서 접근 가능한 LockedTargetBox (자동 모드에서는 null일 수 있으나 형식 유지)
+    public BoundingBox? LockedTargetBox => null; 
 
     private void Awake()
     {
         PointBuffer = new RGBDPoint[_maxPoints];
+        _backupBuffer = new RGBDPoint[_maxPoints];
+
+        if (_depthGradient == null)
+        {
+            _depthGradient = new Gradient();
+            _depthGradient.SetKeys(
+                new GradientColorKey[] { new GradientColorKey(Color.red, 0.0f), new GradientColorKey(Color.blue, 1.0f) },
+                new GradientAlphaKey[] { new GradientAlphaKey(1.0f, 0.0f), new GradientAlphaKey(1.0f, 1.0f) }
+            );
+        }
     }
 
     private IEnumerator Start()
     {
-        yield return new WaitForSeconds(0.05f);
-        if (_ieMasker != null)
-        {
-            _ieMasker.Initialize(_displayLocation, _confidenceThreshold);
-        }
+        yield return new WaitForSeconds(0.1f);
+        if (_ieMasker != null) _ieMasker.Initialize(_displayLocation, _confidenceThreshold);
         LoadModel();
     }
 
@@ -117,7 +110,13 @@ public class IEExecutor : MonoBehaviour
     {
         UpdateInference();
         PrepareDepthData();
-        PrepareRgbData();
+
+        // 타임아웃 체크
+        if (Time.time - _lastValidTime > _keepAliveDuration && CurrentPointCount > 0)
+        {
+             // 필요시 잔상 제거 로직 (선택 사항)
+             // CurrentPointCount = 0; 
+        }
     }
 
     private void OnDestroy()
@@ -126,8 +125,7 @@ public class IEExecutor : MonoBehaviour
         _input?.Dispose();
         _inferenceEngineWorker?.Dispose();
         if (_cpuDepthTex != null) Destroy(_cpuDepthTex);
-        if (_rgbRenderTexture != null) _rgbRenderTexture.Release();
-        if (_rgbCpuTexture != null) Destroy(_rgbCpuTexture);
+        CleanupResources();
     }
 
     private void PrepareDepthData()
@@ -136,47 +134,21 @@ public class IEExecutor : MonoBehaviour
         var depthRT = Shader.GetGlobalTexture("_PreprocessedEnvironmentDepthTexture") as RenderTexture;
         if (depthRT == null) return;
 
-        if (_cpuDepthTex == null || _cpuDepthTex.width != depthRT.width)
+        if (_cpuDepthTex == null || _cpuDepthTex.width != depthRT.width || _cpuDepthTex.height != depthRT.height)
+        {
+            if(_cpuDepthTex != null) Destroy(_cpuDepthTex);
             _cpuDepthTex = new Texture2D(depthRT.width, depthRT.height, TextureFormat.RHalf, false, true);
+        }
 
         _isDepthReadingBack = true;
         AsyncGPUReadback.Request(depthRT, 0, request => {
             if (request.hasError) { _isDepthReadingBack = false; return; }
-            var data = request.GetData<ushort>();
-            _cpuDepthTex.LoadRawTextureData(data);
-            _cpuDepthTex.Apply();
+            if (_cpuDepthTex != null)
+            {
+                _cpuDepthTex.LoadRawTextureData(request.GetData<ushort>());
+                _cpuDepthTex.Apply();
+            }
             _isDepthReadingBack = false;
-        });
-    }
-
-    /// <summary>
-    /// [최적화] RGB 텍스처를 비동기로 읽기 (GetPixels32 대체)
-    /// </summary>
-    private void PrepareRgbData()
-    {
-        if (_webCamManager == null || _isRgbReadingBack) return;
-        WebCamTexture rgbTex = _webCamManager.WebCamTexture;
-        if (rgbTex == null || rgbTex.width < 100) return;
-
-        // RenderTexture 초기화 (필요시)
-        if (_rgbRenderTexture == null || _rgbRenderTexture.width != rgbTex.width)
-        {
-            if (_rgbRenderTexture != null) _rgbRenderTexture.Release();
-            _rgbRenderTexture = new RenderTexture(rgbTex.width, rgbTex.height, 0, RenderTextureFormat.ARGB32);
-            _rgbCpuTexture = new Texture2D(rgbTex.width, rgbTex.height, TextureFormat.RGBA32, false);
-            _rgbPixelCache = new Color32[rgbTex.width * rgbTex.height];
-        }
-
-        // GPU에서 복사 (빠름)
-        Graphics.Blit(rgbTex, _rgbRenderTexture);
-
-        _isRgbReadingBack = true;
-        AsyncGPUReadback.Request(_rgbRenderTexture, 0, TextureFormat.RGBA32, request => {
-            if (request.hasError) { _isRgbReadingBack = false; return; }
-            var data = request.GetData<Color32>();
-            data.CopyTo(_rgbPixelCache);
-            _rgbDataReady = true;
-            _isRgbReadingBack = false;
         });
     }
 
@@ -203,6 +175,8 @@ public class IEExecutor : MonoBehaviour
         _inferenceEngineWorker = new Worker(model, _backend);
         Tensor input = TextureConverter.ToTensor(new Texture2D(_inputSize.x, _inputSize.y), _inputSize.x, _inputSize.y, 3);
         _inferenceEngineWorker.Schedule(input);
+        
+        // [에러 해결 4] 모델 로드 완료 플래그 설정
         IsModelLoaded = true;
     }
 
@@ -223,14 +197,11 @@ public class IEExecutor : MonoBehaviour
                 break;
 
             case InferenceDownloadState.Success:
-                ProcessSuccessState();
+                ProcessInferenceResult();
                 _downloadState = InferenceDownloadState.Cleanup;
                 break;
 
             case InferenceDownloadState.Error:
-                _downloadState = InferenceDownloadState.Cleanup;
-                break;
-
             case InferenceDownloadState.Cleanup:
                 CleanupResources();
                 _downloadState = InferenceDownloadState.Completed;
@@ -239,51 +210,31 @@ public class IEExecutor : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// [최적화] 4개의 출력을 병렬로 Readback 요청
-    /// </summary>
     private void UpdateParallelReadbacks()
     {
-        // 첫 번째 호출: 모든 readback 요청을 동시에 시작
         if (!_readbacksInitiated)
         {
             for (int i = 0; i < 4; i++)
             {
                 _readbackComplete[i] = false;
                 _outputBuffers[i] = _inferenceEngineWorker.PeekOutput(i);
-
-                if (_outputBuffers[i].dataOnBackend != null)
-                {
-                    _outputBuffers[i].ReadbackRequest();
-                }
-                else
-                {
-                    _downloadState = InferenceDownloadState.Error;
-                    return;
-                }
+                if (_outputBuffers[i].dataOnBackend != null) _outputBuffers[i].ReadbackRequest();
+                else { _downloadState = InferenceDownloadState.Error; return; }
             }
             _readbacksInitiated = true;
             return;
         }
 
-        // 이후 호출: 모든 readback이 완료되었는지 확인
         bool allComplete = true;
         for (int i = 0; i < 4; i++)
         {
             if (!_readbackComplete[i])
             {
-                if (_outputBuffers[i].IsReadbackRequestDone())
-                {
-                    _readbackComplete[i] = true;
-                }
-                else
-                {
-                    allComplete = false;
-                }
+                if (_outputBuffers[i].IsReadbackRequestDone()) _readbackComplete[i] = true;
+                else allComplete = false;
             }
         }
 
-        // 모든 readback이 완료되면 텐서 복제
         if (allComplete)
         {
             _output0BoxCoords = _outputBuffers[0].ReadbackAndClone() as Tensor<float>;
@@ -291,140 +242,63 @@ public class IEExecutor : MonoBehaviour
             _output2Masks = _outputBuffers[2].ReadbackAndClone() as Tensor<float>;
             _output3MaskWeights = _outputBuffers[3].ReadbackAndClone() as Tensor<float>;
 
-            // 버퍼 정리
-            for (int i = 0; i < 4; i++)
-            {
-                _outputBuffers[i]?.Dispose();
-                _outputBuffers[i] = null;
-            }
+            for (int i = 0; i < 4; i++) { _outputBuffers[i]?.Dispose(); _outputBuffers[i] = null; }
 
             _downloadState = (_output0BoxCoords != null && _output0BoxCoords.shape[0] > 0)
-                ? InferenceDownloadState.Success
-                : InferenceDownloadState.Error;
+                ? InferenceDownloadState.Success : InferenceDownloadState.Error;
         }
     }
 
-    private void ProcessSuccessState()
+    private void ProcessInferenceResult()
     {
-        List<BoundingBox> currentFrameBoxes;
-
-        if (_isTracking && _lockedTargetBox.HasValue)
+        int boxesFound = _output0BoxCoords.shape[0];
+        
+        if (boxesFound > 0)
         {
-            currentFrameBoxes = ParseBoxesWithoutDraw(_output0BoxCoords, _output1LabelIds, _inputSize.x, _inputSize.y);
-            _currentFrameBoxes.Clear();
-            _currentFrameBoxes.AddRange(currentFrameBoxes);
-
-            _ieBoxer.HideAllBoxes();
-
-            float bestScore = 0f;
-            int bestIndex = -1;
-            BoundingBox bestBox = default;
-            Vector2 prevCenter = new Vector2(_lockedTargetBox.Value.CenterX, _lockedTargetBox.Value.CenterY);
-
-            for (int i = 0; i < currentFrameBoxes.Count; i++)
-            {
-                BoundingBox currBox = currentFrameBoxes[i];
-                float iou = TrackingUtils.CalculateIoU(_lockedTargetBox.Value, currBox);
-
-                if (iou < _minIoUThreshold) continue;
-
-                float dist = Vector2.Distance(prevCenter, new Vector2(currBox.CenterX, currBox.CenterY));
-                float distScore = 1.0f - Mathf.Clamp01(dist / (_inputSize.x * 0.5f));
-                float totalScore = (iou * 0.7f) + (distScore * 0.3f);
-
-                if (totalScore > bestScore)
-                {
-                    bestScore = totalScore;
-                    bestIndex = i;
-                    bestBox = currBox;
-                }
-            }
-
-            if (bestIndex != -1)
-            {
-                _consecutiveLostFrames = 0;
-                UpdateSmoothBox(bestBox);
-                _ieMasker.DrawSingleMask(bestIndex, bestBox, _output3MaskWeights, _inputSize.x, _inputSize.y);
-
-                if (_captureRGBD) ExtractRGBDData(bestIndex, bestBox);
-            }
-            else
-            {
-                _consecutiveLostFrames++;
-                if (_consecutiveLostFrames <= _maxLostFrames)
-                {
-                    PredictBoxMovement();
-                    _ieMasker.KeepCurrentMask();
-                }
-                else
-                {
-                    ResetTracking();
-                }
-            }
+            BoundingBox bestBox = ParseSingleBox(0);
+            _ieBoxer.HideAllBoxes(); 
+            _ieMasker.DrawSingleMask(0, bestBox, _output3MaskWeights, _inputSize.x, _inputSize.y);
+            ExtractDepthData(0, bestBox);
         }
         else
         {
-            currentFrameBoxes = _ieBoxer.DrawBoxes(_output0BoxCoords, _output1LabelIds, _inputSize.x, _inputSize.y);
-            _currentFrameBoxes.Clear();
-            _currentFrameBoxes.AddRange(currentFrameBoxes);
-            _ieMasker.ClearAllMasks();
-            CurrentPointCount = 0;
+            _ieMasker.KeepCurrentMask(); 
         }
     }
 
-    private List<BoundingBox> ParseBoxesWithoutDraw(Tensor<float> output, Tensor<int> labelIds, float imageWidth, float imageHeight)
+    private BoundingBox ParseSingleBox(int index)
     {
-        List<BoundingBox> boundingBoxes = new();
+        var scaleX = _inputSize.x / 640f;
+        var scaleY = _inputSize.y / 640f;
+        var halfWidth = _inputSize.x / 2f;
+        var halfHeight = _inputSize.y / 2f;
 
-        var scaleX = imageWidth / 640;
-        var scaleY = imageHeight / 640;
-        var halfWidth = imageWidth / 2;
-        var halfHeight = imageHeight / 2;
+        var centerX = _output0BoxCoords[index, 0] * scaleX - halfWidth;
+        var centerY = _output0BoxCoords[index, 1] * scaleY - halfHeight;
+        var classname = _ieBoxer.GetClassName(_output1LabelIds[index]);
 
-        int boxesFound = output.shape[0];
-        if (boxesFound <= 0) return boundingBoxes;
-
-        var maxBoxes = Mathf.Min(boxesFound, 200);
-
-        for (var n = 0; n < maxBoxes; n++)
+        return new BoundingBox
         {
-            var centerX = output[n, 0] * scaleX - halfWidth;
-            var centerY = output[n, 1] * scaleY - halfHeight;
-            var classname = _ieBoxer.GetClassName(labelIds[n]);
-
-            var box = new BoundingBox
-            {
-                CenterX = centerX,
-                CenterY = centerY,
-                ClassName = classname,
-                Width = output[n, 2] * scaleX,
-                Height = output[n, 3] * scaleY,
-                Label = classname,
-            };
-            boundingBoxes.Add(box);
-        }
-        return boundingBoxes;
+            CenterX = centerX,
+            CenterY = centerY,
+            ClassName = classname,
+            Width = _output0BoxCoords[index, 2] * scaleX,
+            Height = _output0BoxCoords[index, 3] * scaleY,
+            Label = classname,
+        };
     }
 
-    /// <summary>
-    /// [최적화] 비동기로 읽은 RGB 데이터 사용
-    /// </summary>
-    private void ExtractRGBDData(int targetIndex, BoundingBox box)
+    private void ExtractDepthData(int targetIndex, BoundingBox box)
     {
-        // 비동기 RGB 데이터가 준비되지 않았으면 스킵
-        if (!_rgbDataReady || _cpuDepthTex == null) return;
-        if (_rgbPixelCache == null || _rgbPixelCache.Length == 0) return;
+        if (_cpuDepthTex == null) return;
 
-        // [최적화] 카메라 intrinsics 캐싱 (한 번만 로드)
         if (!_intrinsicsCached)
         {
-            _cachedIntrinsics = PassthroughCameraSamples.PassthroughCameraUtils.GetCameraIntrinsics(
-                PassthroughCameraSamples.PassthroughCameraEye.Left);
+            _cachedIntrinsics = PassthroughCameraUtils.GetCameraIntrinsics(PassthroughCameraEye.Left);
             _intrinsicsCached = true;
         }
 
-        Pose cameraPose = PassthroughCameraSamples.PassthroughCameraUtils.GetCameraPoseInWorld(
-            PassthroughCameraSamples.PassthroughCameraEye.Left);
+        Pose cameraPose = PassthroughCameraUtils.GetCameraPoseInWorld(PassthroughCameraEye.Left);
         Vector3 cameraPos = cameraPose.position;
         Quaternion cameraRot = cameraPose.rotation;
 
@@ -434,79 +308,65 @@ public class IEExecutor : MonoBehaviour
         float cy = _cachedIntrinsics.PrincipalPoint.y;
 
         var depthData = _cpuDepthTex.GetRawTextureData<ushort>();
-        int rgbW = _rgbRenderTexture.width;
-        int rgbH = _rgbRenderTexture.height;
         int depthW = _cpuDepthTex.width;
         int depthH = _cpuDepthTex.height;
 
-        CurrentPointCount = 0;
+        int newPointCount = 0;
+
         for (int y = 0; y < 160; y += _samplingStep)
         {
             for (int x = 0; x < 160; x += _samplingStep)
             {
-                if (CurrentPointCount >= _maxPoints) break;
+                if (newPointCount >= _maxPoints) break;
+
                 float maskVal = _output3MaskWeights[targetIndex, y, x];
                 if (maskVal > _confidenceThreshold)
                 {
-                    Vector2Int rgbPixel = MapMaskToRGBPixel(x, y, box, rgbW, rgbH);
-                    int pixelIdx = (rgbH - 1 - rgbPixel.y) * rgbW + rgbPixel.x;
-                    if (pixelIdx < 0 || pixelIdx >= _rgbPixelCache.Length) continue;
+                    float normX = (float)x / 160f;
+                    float normY = (float)y / 160f;
+                    
+                    float imgPixelX = (box.CenterX - box.Width * 0.5f + normX * box.Width) + 320f;
+                    float imgPixelY = 320f - (box.CenterY - box.Height * 0.5f + normY * box.Height); 
 
-                    float u = (float)rgbPixel.x / rgbW;
-                    float v = (float)rgbPixel.y / rgbH;
+                    float u = Mathf.Clamp01(imgPixelX / 640f);
+                    float v = Mathf.Clamp01(imgPixelY / 640f);
+
                     int dx = Mathf.FloorToInt(u * (depthW - 1));
                     int dy = Mathf.FloorToInt(v * (depthH - 1));
-                    float depthMeters = Mathf.HalfToFloat(depthData[dy * depthW + dx]);
+
+                    int depthIndex = dy * depthW + dx;
+                    if (depthIndex < 0 || depthIndex >= depthData.Length) continue;
+
+                    float depthMeters = Mathf.HalfToFloat(depthData[depthIndex]);
 
                     if (depthMeters > 0.1f && depthMeters < 3.0f)
                     {
-                        Vector3 dirInCamera = new Vector3(
-                            (rgbPixel.x - cx) / fx,
-                            (rgbPixel.y - cy) / fy,
-                            1f
-                        );
-                        Vector3 dirInWorld = cameraRot * dirInCamera;
-                        Vector3 worldPos = cameraPos + dirInWorld.normalized * depthMeters;
+                        Vector3 dirInCamera = new Vector3((dx - cx) / fx, (dy - cy) / fy, 1f);
+                        Vector3 worldPos = cameraPos + (cameraRot * dirInCamera.normalized) * depthMeters;
 
-                        PointBuffer[CurrentPointCount].worldPos = worldPos;
-                        PointBuffer[CurrentPointCount].color = _rgbPixelCache[pixelIdx];
-                        CurrentPointCount++;
+                        PointBuffer[newPointCount].worldPos = worldPos;
+                        
+                        float normalizedDepth = Mathf.Clamp01((depthMeters - 0.2f) / 2.0f);
+                        PointBuffer[newPointCount].color = _depthGradient.Evaluate(normalizedDepth);
+
+                        newPointCount++;
                     }
                 }
             }
         }
-    }
 
-    private Vector2Int MapMaskToRGBPixel(int maskX, int maskY, BoundingBox box, int rgbW, int rgbH)
-    {
-        float normX = (float)maskX / 160f;
-        float normY = (float)maskY / 160f;
-        int pixelX = Mathf.RoundToInt((box.CenterX - box.Width/2f + normX * box.Width) + rgbW/2f);
-        int pixelY = Mathf.RoundToInt(rgbH/2f - (box.CenterY - box.Height/2f + normY * box.Height));
-        return new Vector2Int(Mathf.Clamp(pixelX, 0, rgbW - 1), Mathf.Clamp(pixelY, 0, rgbH - 1));
-    }
-
-    private void UpdateSmoothBox(BoundingBox bestBox)
-    {
-        float speed = _centerVelocity.magnitude;
-        float targetSmoothTime = Mathf.Lerp(_maxSmoothTime, _minSmoothTime, speed / 500f);
-        _currentSmoothTime = Mathf.Lerp(_currentSmoothTime, targetSmoothTime, 0.1f);
-        Vector2 currentPos = new Vector2(_lockedTargetBox.Value.CenterX, _lockedTargetBox.Value.CenterY);
-        Vector2 targetPos = new Vector2(bestBox.CenterX, bestBox.CenterY);
-        Vector2 smoothedPos = Vector2.SmoothDamp(currentPos, targetPos, ref _centerVelocity, _currentSmoothTime);
-        Vector2 currentSize = new Vector2(_lockedTargetBox.Value.Width, _lockedTargetBox.Value.Height);
-        Vector2 targetSize = new Vector2(bestBox.Width, bestBox.Height);
-        Vector2 smoothedSize = Vector2.SmoothDamp(currentSize, targetSize, ref _sizeVelocity, _sizeSmoothTime);
-        _lockedTargetBox = new BoundingBox { CenterX = smoothedPos.x, CenterY = smoothedPos.y, Width = smoothedSize.x, Height = smoothedSize.y, ClassName = bestBox.ClassName, Label = bestBox.Label, WorldPos = bestBox.WorldPos };
-    }
-
-    private void PredictBoxMovement()
-    {
-        float deltaTime = Time.deltaTime;
-        float predX = _lockedTargetBox.Value.CenterX + (_centerVelocity.x * deltaTime);
-        float predY = _lockedTargetBox.Value.CenterY + (_centerVelocity.y * deltaTime);
-        _centerVelocity *= 0.9f;
-        _lockedTargetBox = new BoundingBox { CenterX = predX, CenterY = predY, Width = _lockedTargetBox.Value.Width, Height = _lockedTargetBox.Value.Height, ClassName = _lockedTargetBox.Value.ClassName, Label = _lockedTargetBox.Value.Label, WorldPos = _lockedTargetBox.Value.WorldPos };
+        if (newPointCount > 0)
+        {
+            Array.Copy(PointBuffer, _backupBuffer, newPointCount);
+            _backupCount = newPointCount;
+            CurrentPointCount = newPointCount;
+            _lastValidTime = Time.time;
+        }
+        else if (_backupCount > 0)
+        {
+            Array.Copy(_backupBuffer, PointBuffer, _backupCount);
+            CurrentPointCount = _backupCount;
+        }
     }
 
     private void CleanupResources()
@@ -518,53 +378,19 @@ public class IEExecutor : MonoBehaviour
         _readbacksInitiated = false;
     }
 
-    public void SelectTargetFromScreenPos(Vector2 screenPos)
-    {
-        if (_currentFrameBoxes == null || _currentFrameBoxes.Count == 0) return;
-        float minDistance = float.MaxValue;
-        BoundingBox? bestBox = null;
-        float halfScreenW = Screen.width / 2f;
-        float halfScreenH = Screen.height / 2f;
-
-        foreach (var box in _currentFrameBoxes)
-        {
-            float boxScreenX = box.CenterX + halfScreenW;
-            float boxScreenY = halfScreenH - box.CenterY;
-            float margin = 30f;
-
-            if (screenPos.x >= boxScreenX - box.Width/2f - margin &&
-                screenPos.x <= boxScreenX + box.Width/2f + margin &&
-                screenPos.y >= boxScreenY - box.Height/2f - margin &&
-                screenPos.y <= boxScreenY + box.Height/2f + margin)
-            {
-                float dist = Vector2.Distance(screenPos, new Vector2(boxScreenX, boxScreenY));
-                if (dist < minDistance)
-                {
-                    minDistance = dist;
-                    bestBox = box;
-                }
-            }
-        }
-
-        if (bestBox.HasValue)
-        {
-            _lockedTargetBox = bestBox.Value;
-            _isTracking = true;
-            _consecutiveLostFrames = 0;
-            _centerVelocity = Vector2.zero;
-            _sizeVelocity = Vector2.zero;
-            _currentSmoothTime = _maxSmoothTime;
-            Debug.Log($"[IEExecutor] Target Selected: {bestBox.Value.ClassName}");
-        }
-    }
-
+    // [에러 해결 5] 외부 호출용 함수 복구 (ResetTracking)
+    // 자동 모드이므로 화면 초기화(버퍼 클리어) 용도로 사용
     public void ResetTracking()
     {
-        _isTracking = false;
-        _lockedTargetBox = null;
-        _consecutiveLostFrames = 0;
-        if (_ieMasker != null) _ieMasker.ClearAllMasks();
         CurrentPointCount = 0;
-        Debug.Log("[IEExecutor] Tracking Reset");
+        _backupCount = 0;
+        Debug.Log("[IEExecutor] Buffer Cleared by Trigger");
+    }
+
+    // [에러 해결 6] 외부 호출용 함수 복구 (SelectTargetFromScreenPos)
+    // 자동 모드(Auto Visualization)이므로 별도의 선택 로직 없이 로그만 출력
+    public void SelectTargetFromScreenPos(Vector2 screenPos)
+    {
+        Debug.Log("[IEExecutor] Auto Mode Active: Selection Ignored (Showing best result automatically)");
     }
 }

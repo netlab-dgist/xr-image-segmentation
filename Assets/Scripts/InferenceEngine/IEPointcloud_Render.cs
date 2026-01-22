@@ -4,16 +4,13 @@ using UnityEngine;
 [RequireComponent(typeof(MeshFilter), typeof(MeshRenderer))]
 public class IEPointcloud_Render : MonoBehaviour
 {
-    [Header("References")]
     [SerializeField] private IEExecutor _executor;
-
-    [Header("Settings")]
     [SerializeField] private bool _isRendering = true;
 
     private Mesh _pointMesh;
     private MeshFilter _meshFilter;
     
-    // GC(Garbage Collector) 방지를 위해 리스트 버퍼를 재사용합니다.
+    // 리스트 재사용 (GC 방지)
     private List<Vector3> _vertices = new List<Vector3>();
     private List<Color32> _colors = new List<Color32>();
     private List<int> _indices = new List<int>();
@@ -22,51 +19,45 @@ public class IEPointcloud_Render : MonoBehaviour
     {
         _meshFilter = GetComponent<MeshFilter>();
         _pointMesh = new Mesh();
-        _pointMesh.MarkDynamic(); // 매 프레임 업데이트되는 메쉬 성능 최적화
+        _pointMesh.MarkDynamic(); 
         _meshFilter.mesh = _pointMesh;
     }
 
     void LateUpdate()
     {
         if (!_isRendering || _executor == null) return;
-
         UpdatePointCloud();
     }
 
     private void UpdatePointCloud()
     {
-        // 에러 원인 해결: LastTrackedObjectPoints 대신 PointBuffer와 CurrentPointCount 사용
         var pointBuffer = _executor.PointBuffer;
         int count = _executor.CurrentPointCount;
 
-        // 데이터가 없으면 메쉬를 비우고 리턴
-        if (pointBuffer == null || count == 0)
-        {
-            _pointMesh.Clear();
-            return;
-        }
+        // [완벽 방어] 
+        // 0개라면 아예 렌더링 파이프라인을 건드리지 않고 리턴해버립니다. 
+        // 이렇게 하면 GPU에 올라가 있는 이전 프레임의 메쉬가 그대로 유지됩니다.
+        if (count == 0) return;
 
         _vertices.Clear();
         _colors.Clear();
         _indices.Clear();
 
-        // [최적화] 전체 배열이 아니라 현재 유효한 데이터 개수(count)만큼만 루프를 돕니다.
+        // 버퍼에서 데이터 옮겨담기
         for (int i = 0; i < count; i++)
         {
-            // 월드 좌표를 렌더러의 로컬 좌표로 변환
+            // 로컬 좌표 변환이 필요하다면 사용 (여기서는 월드 좌표를 그대로 쓰거나 변환)
+            // 보통 PointCloud는 월드 좌표로 계산되므로 InverseTransformPoint 필요
             _vertices.Add(transform.InverseTransformPoint(pointBuffer[i].worldPos));
             _colors.Add(pointBuffer[i].color);
             _indices.Add(i);
         }
 
-        // 메쉬 데이터 갱신
+        // 메쉬 갱신
         _pointMesh.Clear();
-        if (_vertices.Count > 0)
-        {
-            _pointMesh.SetVertices(_vertices);
-            _pointMesh.SetColors(_colors);
-            _pointMesh.SetIndices(_indices, MeshTopology.Points, 0);
-            _pointMesh.RecalculateBounds();
-        }
+        _pointMesh.SetVertices(_vertices);
+        _pointMesh.SetColors(_colors);
+        _pointMesh.SetIndices(_indices, MeshTopology.Points, 0);
+        _pointMesh.RecalculateBounds(); // 바운드 재계산 필수
     }
 }
