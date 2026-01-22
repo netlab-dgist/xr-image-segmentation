@@ -616,7 +616,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!114 &494786730
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1170,8 +1170,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   _onnxModel: {fileID: 5022602860645237092, guid: 3f6df67c79fabff4186394a52b25ec66, type: 3}
-  _iouThreshold: 0.6
-  _scoreThreshold: 0.23
+  _iouThreshold: 0.43
+  _scoreThreshold: 0.301
 --- !u!1 &787607877
 GameObject:
   m_ObjectHideFlags: 0
@@ -1223,7 +1223,7 @@ MonoBehaviour:
   _layersPerFrame: 25
   _confidenceThreshold: 0.5
   _displayLocation: {fileID: 270828331}
-  _keepAliveDuration: 1
+  ShowDebugBox: 1
   _depthManager: {fileID: 1301121621}
   _maxPoints: 8000
   _depthGradient:
@@ -1256,7 +1256,7 @@ MonoBehaviour:
     m_ColorSpace: -1
     m_NumColorKeys: 2
     m_NumAlphaKeys: 2
-  _samplingStep: 6
+  _samplingStep: 3
   _ieBoxer: {fileID: 568621722}
   _ieMasker: {fileID: 787607881}
 --- !u!114 &787607881
@@ -1654,7 +1654,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   _occlusionShadersMode: 2
-  _removeHands: 0
+  _removeHands: 1
   CustomTrackingSpace: {fileID: 0}
   <MaskMeshFilters>k__BackingField: []
   _cameraRig: {fileID: 700560615}
