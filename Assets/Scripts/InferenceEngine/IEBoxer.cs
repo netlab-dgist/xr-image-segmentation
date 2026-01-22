@@ -69,11 +69,11 @@ public class IEBoxer : MonoBehaviour
                 Label = $"{classname}",
             };
 
-            Debug.Log($"Box {n}: {box.Label} - Center: ({box.CenterX}, {box.CenterY}), Size: ({box.Width}, {box.Height})");
+            //Debug.Log($"Box {n}: {box.Label} - Center: ({box.CenterX}, {box.CenterY}), Size: ({box.Width}, {box.Height})");
 
             boundingBoxes.Add(box);
 
-            DrawBox(box, n);
+            //DrawBox(box, n);
         }
         ClearBoxes(maxBoxes);
 
@@ -95,7 +95,8 @@ public class IEBoxer : MonoBehaviour
     }
 
     private void DrawBox(BoundingBox box, int id)
-    {
+    {   
+        
         GameObject panel;
         if (id < _boxPool.Count)
         {
@@ -161,6 +162,19 @@ public class IEBoxer : MonoBehaviour
         _boxPool.Add(panel);
 
         return panel;
+    }
+    public void HideAllBoxes()
+    {
+        foreach (var box in _boxPool)
+        {
+            if (box != null) box.SetActive(false);
+        }
+    }
+
+    // 특정 박스 하나만 시각화하는 공개 함수
+    public void DrawSpecificBox(BoundingBox box, int id)
+    {
+        DrawBox(box, id);
     }
 
 }

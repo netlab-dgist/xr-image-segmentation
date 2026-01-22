@@ -1298,9 +1298,9 @@ MonoBehaviour:
   m_AudioPlay: 0
   m_DebugDrawModesUseInteractiveLightBakingData: 0
   m_Position:
-    m_Target: {x: -4.535877, y: 12.2855, z: 467.40454}
+    m_Target: {x: 553.967, y: 334.03204, z: 50.054474}
     speed: 2
-    m_Value: {x: -4.535877, y: 12.2855, z: 467.40454}
+    m_Value: {x: 553.967, y: 334.03204, z: 50.054474}
   m_RenderMode: 0
   m_CameraMode:
     drawMode: 0
@@ -1346,17 +1346,17 @@ MonoBehaviour:
     m_GridAxis: 1
     m_gridOpacity: 0.5
   m_Rotation:
-    m_Target: {x: 0, y: 0, z: 0, w: 1}
+    m_Target: {x: 0.04528589, y: 0.85734665, z: 0.07648967, w: -0.507185}
     speed: 2
-    m_Value: {x: -0, y: 0, z: -0, w: -1}
+    m_Value: {x: 0.04528589, y: 0.85734665, z: 0.07648967, w: -0.507185}
   m_Size:
-    m_Target: 383.13837
+    m_Target: 335.4102
     speed: 2
-    m_Value: 383.13837
+    m_Value: 335.4102
   m_Ortho:
-    m_Target: 1
+    m_Target: 0
     speed: 2
-    m_Value: 1
+    m_Value: 0
   m_CameraSettings:
     m_Speed: 1
     m_SpeedNormalized: 0.5
@@ -1518,7 +1518,7 @@ MonoBehaviour:
     scrollPos: {x: 0, y: 79}
     m_SelectedIDs: c6390300
     m_LastClickedID: 211398
-    m_ExpandedIDs: 0000000086df0000
+    m_ExpandedIDs: 0000000062e00000
     m_RenameOverlay:
       m_UserAcceptedRename: 0
       m_Name: 
@@ -1547,7 +1547,7 @@ MonoBehaviour:
     scrollPos: {x: 0, y: 0}
     m_SelectedIDs: 
     m_LastClickedID: 0
-    m_ExpandedIDs: 0000000086df0000
+    m_ExpandedIDs: 0000000062e00000
     m_RenameOverlay:
       m_UserAcceptedRename: 0
       m_Name: 
@@ -1972,7 +1972,7 @@ MonoBehaviour:
   m_ShowGizmos: 0
   m_TargetDisplay: 0
   m_ClearColor: {r: 0, g: 0, b: 0, a: 0}
-  m_TargetSize: {x: 1098, y: 559}
+  m_TargetSize: {x: 1647, y: 838.5}
   m_TextureFilterMode: 0
   m_TextureHideFlags: 61
   m_RenderIMGUI: 1
@@ -1987,10 +1987,10 @@ MonoBehaviour:
     m_VRangeLocked: 0
     hZoomLockedByDefault: 0
     vZoomLockedByDefault: 0
-    m_HBaseRangeMin: -366
-    m_HBaseRangeMax: 366
-    m_VBaseRangeMin: -186.33334
-    m_VBaseRangeMax: 186.33334
+    m_HBaseRangeMin: -549
+    m_HBaseRangeMax: 549
+    m_VBaseRangeMin: -279.5
+    m_VBaseRangeMax: 279.5
     m_HAllowExceedBaseRangeMin: 1
     m_HAllowExceedBaseRangeMax: 1
     m_VAllowExceedBaseRangeMin: 1
