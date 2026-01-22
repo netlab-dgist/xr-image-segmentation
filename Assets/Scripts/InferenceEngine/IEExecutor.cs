@@ -19,23 +19,13 @@ public class IEExecutor : MonoBehaviour
         Completed = 8
     }
 
-    [Header("Model Settings")]
     [SerializeField] private Vector2Int _inputSize = new(640, 640);
     [SerializeField] private BackendType _backend = BackendType.CPU;
     [SerializeField] private ModelAsset _sentisModel;
     [SerializeField] private int _layersPerFrame = 25;
     [SerializeField] private float _confidenceThreshold = 0.5f;
+    [SerializeField] private TextAsset _labelsAsset;
     [SerializeField] private Transform _displayLocation;
-
-    [Header("Natural Tracking Settings")]
-    [SerializeField] private int _maxLostFrames = 15; // [상향] 가려졌을 때 더 오래 버티도록 10 -> 15 프레임으로 늘림
-    [SerializeField] private float _minIoUThreshold = 0.3f;
-    
-    // 적응형 스무딩 범위
-    [SerializeField] private float _minSmoothTime = 0.03f;
-    [SerializeField] private float _maxSmoothTime = 0.2f; 
-    [SerializeField] private float _sizeSmoothTime = 0.3f; 
-    
     public bool IsModelLoaded { get; private set; } = false;
 
     [SerializeField] private IEBoxer _ieBoxer;
@@ -46,11 +36,13 @@ public class IEExecutor : MonoBehaviour
     private InferenceDownloadState _downloadState = InferenceDownloadState.Running;
 
     private Tensor<float> _input;
+
     private Tensor _buffer;
     private Tensor<float> _output0BoxCoords;
     private Tensor<int> _output1LabelIds;
     private Tensor<float> _output2Masks;
     private Tensor<float> _output3MaskWeights;
+<<<<<<< HEAD
     
     // 추적 관련 변수
     private BoundingBox? _lockedTargetBox = null;
@@ -71,9 +63,17 @@ public class IEExecutor : MonoBehaviour
     public Tensor<float> OutputMasks => _output2Masks;
     public Tensor<float> OutputMaskWeights => _output3MaskWeights;
     public Vector2Int InputSize => _inputSize;    
+=======
+
+    private bool _started = false;
+    private bool _isWaitingForReadbackRequest = false;
+
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
     private IEnumerator Start()
     {
+        // Wait for the UI to be ready because when Sentis load the model it will block the main thread.
         yield return new WaitForSeconds(0.05f);
+
         _ieMasker = new IEMasker(_displayLocation, _confidenceThreshold);
         LoadModel();
     }
@@ -85,22 +85,30 @@ public class IEExecutor : MonoBehaviour
 
     private void OnDestroy()
     {
-        if (_schedule != null) StopCoroutine(_schedule);
+        if (_schedule != null)
+        {
+            StopCoroutine(_schedule);
+        }
         _input?.Dispose();
         _inferenceEngineWorker?.Dispose();
     }
 
     public void RunInference(Texture inputTexture)
     {
+        // If the inference is not running prepare the input
         if (!_started)
         {
+            // Clean last input
             _input?.Dispose();
+
+            // Check if we have a texture from the camera
             if (!inputTexture) return;
 
+            // Convert the texture to a Tensor and schedule the inference
             _inputSize = new Vector2Int(inputTexture.width, inputTexture.height);
             _input = TextureConverter.ToTensor(inputTexture, 640, 640, 3);
             _schedule = _inferenceEngineWorker.ScheduleIterable(_input);
-
+ 
             _downloadState = InferenceDownloadState.Running;
             _started = true;
         }
@@ -110,24 +118,34 @@ public class IEExecutor : MonoBehaviour
 
     private void LoadModel()
     {
+        // Load model
         Model model = ModelLoader.Load(_sentisModel);
+
+        // Create engine to run model
         _inferenceEngineWorker = new Worker(model, _backend);
+
+        // Run a inference with an empty input to load the model in the memory and not pause the main thread.
         Tensor input = TextureConverter.ToTensor(new Texture2D(_inputSize.x, _inputSize.y), _inputSize.x, _inputSize.y, 3);
         _inferenceEngineWorker.Schedule(input);
+
         IsModelLoaded = true;
     }
 
     private void UpdateInference()
     {
+        // Run the inference layer by layer to not block the main thread.
         if (!_started) return;
         if (_downloadState == InferenceDownloadState.Running)
         {
             int it = 0;
             while (_schedule.MoveNext()) if (++it % _layersPerFrame == 0) return;
+
+            // If we reach here, all layers have been processed
             _downloadState = InferenceDownloadState.RequestingOutput0;
         }
         else
         {
+            // Get the result once all layers are processed
             UpdateProcessInferenceResults();
         }
     }
@@ -137,32 +155,133 @@ public class IEExecutor : MonoBehaviour
         switch (_downloadState)
         {
             case InferenceDownloadState.RequestingOutput0:
-                HandleReadback(0, ref _output0BoxCoords, ref _downloadState, InferenceDownloadState.RequestingOutput1);
+                if (!_isWaitingForReadbackRequest)
+                {
+                    _buffer = GetOutputBuffer(0);
+                    InitiateReadbackRequest(_buffer);
+                }
+                else
+                {
+                    if (_buffer.IsReadbackRequestDone())
+                    {
+                        _output0BoxCoords = _buffer.ReadbackAndClone() as Tensor<float>;
+                        _isWaitingForReadbackRequest = false;
+
+                        if (_output0BoxCoords.shape[0] > 0)
+                        {
+                            Debug.Log("Sentis: _output0BoxCoords ready");
+                            _downloadState = InferenceDownloadState.RequestingOutput1;
+                        }
+                        else
+                        {
+                            Debug.LogError("Sentis: _output0BoxCoords empty");
+                            _downloadState = InferenceDownloadState.Error;
+                        }
+                        _buffer?.Dispose();
+                    }
+                }
                 break;
             case InferenceDownloadState.RequestingOutput1:
-                HandleReadback(1, ref _output1LabelIds, ref _downloadState, InferenceDownloadState.RequestingOutput2);
+                if (!_isWaitingForReadbackRequest)
+                {
+                    _buffer = GetOutputBuffer(1) as Tensor<int>;
+                    InitiateReadbackRequest(_buffer);
+                }
+                else
+                {
+                    if (_buffer.IsReadbackRequestDone())
+                    {
+                        _output1LabelIds = _buffer.ReadbackAndClone() as Tensor<int>;
+                        _isWaitingForReadbackRequest = false;
+
+                        if (_output1LabelIds.shape[0] > 0)
+                        {
+                            Debug.Log("Sentis: _output1LabelIds ready");
+                            _downloadState = InferenceDownloadState.RequestingOutput2;
+                        }
+                        else
+                        {
+                            Debug.LogError("Sentis: _output1LabelIds empty");
+                            _downloadState = InferenceDownloadState.Error;
+                        }
+                        _buffer?.Dispose();
+                    }
+                }
                 break;
             case InferenceDownloadState.RequestingOutput2:
-                HandleReadback(2, ref _output2Masks, ref _downloadState, InferenceDownloadState.RequestingOutput3);
+                if (!_isWaitingForReadbackRequest)
+                {
+                    _buffer = GetOutputBuffer(2) as Tensor<float>;
+                    InitiateReadbackRequest(_buffer);
+                }
+                else
+                {
+                    if (_buffer.IsReadbackRequestDone())
+                    {
+                        _output2Masks = _buffer.ReadbackAndClone() as Tensor<float>;
+                        _isWaitingForReadbackRequest = false;
+
+                        if (_output2Masks.shape[0] > 0)
+                        {
+                            Debug.Log("Sentis: _output2Masks ready");
+                            _downloadState = InferenceDownloadState.RequestingOutput3;
+                        }
+                        else
+                        {
+                            Debug.LogError("Sentis: _output2Masks empty");
+                            _downloadState = InferenceDownloadState.Error;
+                        }
+                        _buffer?.Dispose();
+                    }
+                }
                 break;
             case InferenceDownloadState.RequestingOutput3:
-                HandleReadback(3, ref _output3MaskWeights, ref _downloadState, InferenceDownloadState.Success);
+                if (!_isWaitingForReadbackRequest)
+                {
+                    _buffer = GetOutputBuffer(3) as Tensor<float>;
+                    InitiateReadbackRequest(_buffer);
+                }
+                else
+                {
+                    if (_buffer.IsReadbackRequestDone())
+                    {
+                        _output3MaskWeights = _buffer.ReadbackAndClone() as Tensor<float>;
+                        _isWaitingForReadbackRequest = false;
+
+                        if (_output3MaskWeights.shape[0] > 0)
+                        {
+                            Debug.Log("Sentis: _output3MaskWeights ready");
+                            _downloadState = InferenceDownloadState.Success;
+                        }
+                        else
+                        {
+                            Debug.LogError("Sentis: _output3MaskWeights empty");
+                            _downloadState = InferenceDownloadState.Error;
+                        }
+                        _buffer?.Dispose();
+                    }
+                }
                 break;
             case InferenceDownloadState.Success:
-                ProcessSuccessState();
+                List<BoundingBox> boundingBoxes = _ieBoxer.DrawBoxes(_output0BoxCoords, _output1LabelIds, _inputSize.x, _inputSize.y);
+                _ieMasker.DrawMask(boundingBoxes, _output3MaskWeights, _inputSize.x, _inputSize.y);
                 _downloadState = InferenceDownloadState.Cleanup;
                 break;
             case InferenceDownloadState.Error:
                 _downloadState = InferenceDownloadState.Cleanup;
                 break;
             case InferenceDownloadState.Cleanup:
-                CleanupResources();
                 _downloadState = InferenceDownloadState.Completed;
                 _started = false;
+                _output0BoxCoords?.Dispose();
+                _output1LabelIds?.Dispose();
+                _output2Masks?.Dispose();
+                _output3MaskWeights?.Dispose();
                 break;
         }
     }
 
+<<<<<<< HEAD
     private void HandleReadback<T>(int outputIndex, ref Tensor<T> targetTensor, ref InferenceDownloadState currentState, InferenceDownloadState nextState) where T : unmanaged
     {
         if (!_isWaitingForReadbackRequest)
@@ -357,6 +476,8 @@ public class IEExecutor : MonoBehaviour
         Debug.Log("[IEExecutor] Tracking Reset");
     }
 
+=======
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
     private Tensor GetOutputBuffer(int outputIndex)
     {
         return _inferenceEngineWorker.PeekOutput(outputIndex);
@@ -371,6 +492,7 @@ public class IEExecutor : MonoBehaviour
         }
         else
         {
+            Debug.LogError($"InitiateReadbackRequest: No data output");
             _downloadState = InferenceDownloadState.Error;
         }
     }

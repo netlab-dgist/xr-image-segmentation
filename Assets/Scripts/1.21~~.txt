@@ -32,4 +32,13 @@
 20260121 21 27: tracking하는 bbbox filtering완
 
 3.meta xr depth api를 연동하여 depth획득 
+depth 획득 로직 일부 수정 필요
+필요 테스트 1. rgb-depth 정합 성 테스트 (uv 매핑 오차 확인해야함)
+			2. depth masking 확인 
+
+
+rgb카메라와 depth센서의 fov,위치가 다른거 고려
+
+이미 util내에서 투영 및 뷰 행렬 계산 
+
 
