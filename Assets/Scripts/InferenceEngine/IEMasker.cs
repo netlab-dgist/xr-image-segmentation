@@ -62,6 +62,55 @@ public class IEMasker
         ClearMasks(numObjects);
     }
 
+    /// <summary>
+    /// 단일 객체의 마스크만 그립니다. 트래킹 모드에서 사용됩니다.
+    /// </summary>
+    /// <param name="targetIndex">그릴 객체의 인덱스. -1이면 모든 마스크를 숨깁니다.</param>
+    public void DrawSingleMask(int targetIndex, BoundingBox box, Tensor<float> mask, int imageWidth, int imageHeight)
+    {
+        // 인덱스가 -1이면 모든 마스크 숨기기
+        if (targetIndex < 0 || mask == null)
+        {
+            ClearMasks(0);
+            return;
+        }
+
+        if (mask.shape[1] != YOLO11_MASK_HEIGHT || mask.shape[2] != YOLO11_MASK_WIDTH)
+        {
+            Debug.LogWarning("Mask shape is invalid.");
+            return;
+        }
+
+        Color32[] pixelArray = new Color32[YOLO11_MASK_HEIGHT * YOLO11_MASK_WIDTH];
+        Texture2D maskTexture = GetTexture(0, imageWidth, imageHeight);
+
+        for (int y = 0; y < YOLO11_MASK_HEIGHT; y++)
+        {
+            for (int x = 0; x < YOLO11_MASK_WIDTH; x++)
+            {
+                float value = mask[targetIndex, y, x];
+
+                int posX = x;
+                int posY = YOLO11_MASK_HEIGHT - y - 1;
+
+                if (value > _confidenceThreshold && PixelInBoundingBox(box, posX, posY, imageWidth, imageHeight))
+                {
+                    pixelArray[posY * YOLO11_MASK_WIDTH + posX] = GetColor(0);
+                }
+                else
+                {
+                    pixelArray[posY * YOLO11_MASK_WIDTH + posX] = Color.clear;
+                }
+            }
+        }
+
+        maskTexture.SetPixels32(pixelArray);
+        maskTexture.Apply();
+
+        // 첫 번째 마스크만 사용하고 나머지는 숨기기
+        ClearMasks(1);
+    }
+
     private void ClearMasks(int lastBoxCount)
     {
         // Disable all mask images that are not needed
