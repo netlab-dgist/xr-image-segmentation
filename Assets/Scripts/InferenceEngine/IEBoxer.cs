@@ -177,4 +177,14 @@ public class IEBoxer : MonoBehaviour
         DrawBox(box, id);
     }
 
+    /// <summary>
+    /// [깜빡임 방지] 레이블 ID로 클래스 이름 가져오기
+    /// </summary>
+    public string GetClassName(int labelId)
+    {
+        if (_labels == null || labelId < 0 || labelId >= _labels.Length)
+            return "unknown";
+        return _labels[labelId].Replace(" ", "_");
+    }
+
 }

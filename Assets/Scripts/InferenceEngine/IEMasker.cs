@@ -14,10 +14,18 @@ public class IEMasker
 
     private float _confidenceThreshold = 0.5f;
 
+    // [깜빡임 방지] 픽셀 배열 캐싱 (GC 감소)
+    private Color32[] _cachedPixelArray;
+
+    // [깜빡임 방지] 마지막으로 그린 마스크 상태 캐싱
+    private int _lastTargetIndex = -1;
+    private bool _hasCachedMask = false;
+
     public IEMasker(Transform displayLocation, float confidenceThreshold)
     {
         _displayLocation = displayLocation;
         _confidenceThreshold = confidenceThreshold;
+        _cachedPixelArray = new Color32[YOLO11_MASK_HEIGHT * YOLO11_MASK_WIDTH];
     }
 
     public void DrawMask(List<BoundingBox> boundBoxes, Tensor<float> mask, int imageWidth, int imageHeight)
@@ -72,6 +80,8 @@ public class IEMasker
         if (targetIndex < 0 || mask == null)
         {
             ClearMasks(0);
+            _hasCachedMask = false;
+            _lastTargetIndex = -1;
             return;
         }
 
@@ -81,8 +91,11 @@ public class IEMasker
             return;
         }
 
-        Color32[] pixelArray = new Color32[YOLO11_MASK_HEIGHT * YOLO11_MASK_WIDTH];
+        // [깜빡임 방지] 텍스처를 먼저 가져와서 활성화 상태 유지
         Texture2D maskTexture = GetTexture(0, imageWidth, imageHeight);
+
+        // [깜빡임 방지] 캐싱된 배열 사용 (GC 감소)
+        Color32 maskColor = GetColor(0);
 
         for (int y = 0; y < YOLO11_MASK_HEIGHT; y++)
         {
@@ -95,21 +108,42 @@ public class IEMasker
 
                 if (value > _confidenceThreshold && PixelInBoundingBox(box, posX, posY, imageWidth, imageHeight))
                 {
-                    pixelArray[posY * YOLO11_MASK_WIDTH + posX] = GetColor(0);
+                    _cachedPixelArray[posY * YOLO11_MASK_WIDTH + posX] = maskColor;
                 }
                 else
                 {
-                    pixelArray[posY * YOLO11_MASK_WIDTH + posX] = Color.clear;
+                    _cachedPixelArray[posY * YOLO11_MASK_WIDTH + posX] = Color.clear;
                 }
             }
         }
 
-        maskTexture.SetPixels32(pixelArray);
+        // [깜빡임 방지] 텍스처 업데이트 후 불필요한 마스크 숨기기
+        maskTexture.SetPixels32(_cachedPixelArray);
         maskTexture.Apply();
+
+        // 캐시 상태 업데이트
+        _lastTargetIndex = targetIndex;
+        _hasCachedMask = true;
 
         // 첫 번째 마스크만 사용하고 나머지는 숨기기
         ClearMasks(1);
     }
+
+    /// <summary>
+    /// [깜빡임 방지] Lost frames 동안 마스크 가시성만 유지 (텍스처 업데이트 없음)
+    /// </summary>
+    public void KeepCurrentMask()
+    {
+        if (_hasCachedMask && _maskImages.Count > 0)
+        {
+            _maskImages[0].gameObject.SetActive(true);
+        }
+    }
+
+    /// <summary>
+    /// [깜빡임 방지] 현재 캐시된 마스크가 있는지 확인
+    /// </summary>
+    public bool HasCachedMask => _hasCachedMask;
 
     private void ClearMasks(int lastBoxCount)
     {
@@ -118,6 +152,14 @@ public class IEMasker
         {
             _maskImages[i].gameObject.SetActive(false);
         }
+    }
+
+    /// <summary>
+    /// [깜빡임 방지] 모든 마스크를 숨기는 public 메서드
+    /// </summary>
+    public void ClearAllMasks()
+    {
+        ClearMasks(0);
     }
 
     private void DebugDrawBoundingBox(Texture2D maskTexture, BoundingBox box, Color color, int imageWidth, int imageHeight)

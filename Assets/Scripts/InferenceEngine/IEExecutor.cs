@@ -203,12 +203,17 @@ public class IEExecutor : MonoBehaviour
 
     private void ProcessSuccessState()
     {
-        List<BoundingBox> currentFrameBoxes = _ieBoxer.DrawBoxes(_output0BoxCoords, _output1LabelIds, _inputSize.x, _inputSize.y);
-        _currentFrameBoxes = currentFrameBoxes;
+        // [깜빡임 방지] 추적 중일 때는 DrawBoxes를 호출하지 않고 박스 데이터만 파싱
+        List<BoundingBox> currentFrameBoxes;
 
         if (_isTracking && _lockedTargetBox.HasValue)
         {
-            _ieBoxer.ClearBoxes(0);
+            // 추적 모드: 박스 시각화 없이 데이터만 파싱
+            currentFrameBoxes = ParseBoxesWithoutDraw(_output0BoxCoords, _output1LabelIds, _inputSize.x, _inputSize.y);
+            _currentFrameBoxes = currentFrameBoxes;
+
+            // 추적 중에는 모든 박스 숨김 (이미 숨겨진 상태 유지)
+            _ieBoxer.HideAllBoxes();
 
             float bestScore = 0f;
             int bestIndex = -1;
@@ -239,6 +244,7 @@ public class IEExecutor : MonoBehaviour
                 _consecutiveLostFrames = 0;
                 UpdateSmoothBox(bestBox);
 
+                // [깜빡임 방지] 마스크 업데이트 (IEMasker 내부에서 처리)
                 _ieMasker.DrawSingleMask(bestIndex, bestBox, _output3MaskWeights, _inputSize.x, _inputSize.y);
 
                 if (_captureRGBD) ExtractRGBDData(bestIndex, bestBox);
@@ -246,15 +252,63 @@ public class IEExecutor : MonoBehaviour
             else
             {
                 _consecutiveLostFrames++;
-                if (_consecutiveLostFrames <= _maxLostFrames) PredictBoxMovement();
-                else ResetTracking();
+                if (_consecutiveLostFrames <= _maxLostFrames)
+                {
+                    PredictBoxMovement();
+                    // [깜빡임 방지] Lost frame 동안 이전 마스크 명시적으로 유지
+                    _ieMasker.KeepCurrentMask();
+                }
+                else
+                {
+                    ResetTracking();
+                }
             }
         }
         else
         {
-            _ieMasker.DrawSingleMask(-1, default, null, _inputSize.x, _inputSize.y);
+            // 비추적 모드: 기존처럼 박스 시각화
+            currentFrameBoxes = _ieBoxer.DrawBoxes(_output0BoxCoords, _output1LabelIds, _inputSize.x, _inputSize.y);
+            _currentFrameBoxes = currentFrameBoxes;
+            _ieMasker.ClearAllMasks();
             CurrentPointCount = 0;
         }
+    }
+
+    /// <summary>
+    /// [깜빡임 방지] 박스 시각화 없이 데이터만 파싱하는 헬퍼 함수
+    /// </summary>
+    private List<BoundingBox> ParseBoxesWithoutDraw(Tensor<float> output, Tensor<int> labelIds, float imageWidth, float imageHeight)
+    {
+        List<BoundingBox> boundingBoxes = new();
+
+        var scaleX = imageWidth / 640;
+        var scaleY = imageHeight / 640;
+        var halfWidth = imageWidth / 2;
+        var halfHeight = imageHeight / 2;
+
+        int boxesFound = output.shape[0];
+        if (boxesFound <= 0) return boundingBoxes;
+
+        var maxBoxes = Mathf.Min(boxesFound, 200);
+
+        for (var n = 0; n < maxBoxes; n++)
+        {
+            var centerX = output[n, 0] * scaleX - halfWidth;
+            var centerY = output[n, 1] * scaleY - halfHeight;
+            var classname = _ieBoxer.GetClassName(labelIds[n]);
+
+            var box = new BoundingBox
+            {
+                CenterX = centerX,
+                CenterY = centerY,
+                ClassName = classname,
+                Width = output[n, 2] * scaleX,
+                Height = output[n, 3] * scaleY,
+                Label = classname,
+            };
+            boundingBoxes.Add(box);
+        }
+        return boundingBoxes;
     }
 
     private void ExtractRGBDData(int targetIndex, BoundingBox box)
@@ -381,7 +435,7 @@ public class IEExecutor : MonoBehaviour
         if (bestBox.HasValue) { _lockedTargetBox = bestBox.Value; _isTracking = true; _consecutiveLostFrames = 0; _centerVelocity = Vector2.zero; _sizeVelocity = Vector2.zero; _currentSmoothTime = _maxSmoothTime; Debug.Log($"[IEExecutor] Target Selected: {bestBox.Value.ClassName}"); }
     }
 
-    public void ResetTracking() { _isTracking = false; _lockedTargetBox = null; _consecutiveLostFrames = 0; if (_ieMasker != null) _ieMasker.DrawSingleMask(-1, default, null, _inputSize.x, _inputSize.y); CurrentPointCount = 0; Debug.Log("[IEExecutor] Tracking Reset"); }
+    public void ResetTracking() { _isTracking = false; _lockedTargetBox = null; _consecutiveLostFrames = 0; if (_ieMasker != null) _ieMasker.ClearAllMasks(); CurrentPointCount = 0; Debug.Log("[IEExecutor] Tracking Reset"); }
     private Tensor GetOutputBuffer(int outputIndex) => _inferenceEngineWorker.PeekOutput(outputIndex);
     private void InitiateReadbackRequest(Tensor pullTensor) { if (pullTensor.dataOnBackend != null) { pullTensor.ReadbackRequest(); _isWaitingForReadbackRequest = true; } else _downloadState = InferenceDownloadState.Error; }
 }
