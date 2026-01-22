@@ -56,7 +56,7 @@ public class IEExecutor : MonoBehaviour
     private BoundingBox? _lockedTargetBox = null;
     private bool _isTracking = false;
     private int _consecutiveLostFrames = 0;
-    
+    private int _lockedTargetIndex = -1;
     // 물리적 움직임 계산용
     private Vector2 _centerVelocity;
     private Vector2 _sizeVelocity;
@@ -65,7 +65,12 @@ public class IEExecutor : MonoBehaviour
     private bool _started = false;
     private bool _isWaitingForReadbackRequest = false;
     private List<BoundingBox> _currentFrameBoxes = new();
-
+    public bool IsTracking => _isTracking;
+    public BoundingBox? LockedTargetBox => _lockedTargetBox;
+    public int LockedTargetIndex => _lockedTargetIndex;
+    public Tensor<float> OutputMasks => _output2Masks;
+    public Tensor<float> OutputMaskWeights => _output3MaskWeights;
+    public Vector2Int InputSize => _inputSize;    
     private IEnumerator Start()
     {
         yield return new WaitForSeconds(0.05f);
@@ -218,7 +223,7 @@ public class IEExecutor : MonoBehaviour
             {
                 // [성공] 물체를 찾음 -> 마스크 갱신
                 _consecutiveLostFrames = 0;
-
+                _lockedTargetIndex = bestIndex; // [추가] 인덱스 저장
                 float speed = _centerVelocity.magnitude;
                 float targetSmoothTime = Mathf.Lerp(_maxSmoothTime, _minSmoothTime, speed / 500f);
                 _currentSmoothTime = Mathf.Lerp(_currentSmoothTime, targetSmoothTime, 0.1f);
@@ -249,7 +254,7 @@ public class IEExecutor : MonoBehaviour
             {
                 // [실패] 물체를 놓침 (가려짐 등)
                 _consecutiveLostFrames++;
-                
+                _lockedTargetIndex = -1; // 놓쳤을 땐 인덱스 무효화
                 if (_consecutiveLostFrames <= _maxLostFrames)
                 {
                     // [핵심 변경 사항]
