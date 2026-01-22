@@ -8,21 +8,23 @@ MonoBehaviour:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 0}
   m_Enabled: 1
+<<<<<<< HEAD
+=======
   m_EditorHideFlags: 0
   m_Script: {fileID: 12004, guid: 0000000000000000e000000000000000, type: 0}
   m_Name: 
   m_EditorClassIdentifier: 
   m_PixelRect:
     serializedVersion: 2
-    x: 2032
-    y: 1352
-    width: 512
-    height: 40
-  m_ShowMode: 6
-  m_Title: Meta.XR.Editor.Notifications.NotificationWindow
-  m_RootView: {fileID: 6}
-  m_MinSize: {x: 512, y: 39.90857}
-  m_MaxSize: {x: 512, y: 39.90857}
+    x: 556
+    y: 135
+    width: 832
+    height: 708
+  m_ShowMode: 0
+  m_Title: Project Settings
+  m_RootView: {fileID: 5}
+  m_MinSize: {x: 310, y: 226}
+  m_MaxSize: {x: 4000, y: 4026}
   m_Maximized: 0
 --- !u!114 &2
 MonoBehaviour:
@@ -38,15 +40,15 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   m_PixelRect:
     serializedVersion: 2
-    x: 380
-    y: 258.6667
-    width: 780
-    height: 1126
+    x: 499
+    y: 207
+    width: 725
+    height: 578
   m_ShowMode: 0
-  m_Title: Welcome to Meta XR SDK
-  m_RootView: {fileID: 8}
-  m_MinSize: {x: 780, y: 1126}
-  m_MaxSize: {x: 780, y: 1126}
+  m_Title: Build Profiles
+  m_RootView: {fileID: 7}
+  m_MinSize: {x: 725, y: 426}
+  m_MaxSize: {x: 4000, y: 4026}
   m_Maximized: 0
 --- !u!114 &3
 MonoBehaviour:
@@ -56,144 +58,37 @@ MonoBehaviour:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 0}
   m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 12004, guid: 0000000000000000e000000000000000, type: 0}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  m_PixelRect:
-    serializedVersion: 2
-    x: 556
-    y: 135.33334
-    width: 832
-    height: 708
-  m_ShowMode: 0
-  m_Title: Project Settings
-  m_RootView: {fileID: 10}
-  m_MinSize: {x: 310, y: 226}
-  m_MaxSize: {x: 4000, y: 4026}
-  m_Maximized: 0
---- !u!114 &4
-MonoBehaviour:
-  m_ObjectHideFlags: 52
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 12004, guid: 0000000000000000e000000000000000, type: 0}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  m_PixelRect:
-    serializedVersion: 2
-    x: 499.33334
-    y: 207.33334
-    width: 726
-    height: 578
-  m_ShowMode: 0
-  m_Title: Build Profiles
-  m_RootView: {fileID: 12}
-  m_MinSize: {x: 725, y: 426}
-  m_MaxSize: {x: 4000, y: 4026}
-  m_Maximized: 0
---- !u!114 &5
-MonoBehaviour:
-  m_ObjectHideFlags: 52
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
   m_EditorHideFlags: 1
   m_Script: {fileID: 12004, guid: 0000000000000000e000000000000000, type: 0}
   m_Name: 
   m_EditorClassIdentifier: 
   m_PixelRect:
     serializedVersion: 2
-    x: 0
-    y: 42.666668
-    width: 2560
-    height: 1349.3334
+<<<<<<< HEAD
+    x: 1281.3334
+    y: 50
+    width: 1277.3334
+    height: 1340.6667
   m_ShowMode: 4
   m_Title: Project
-  m_RootView: {fileID: 14}
+  m_RootView: {fileID: 3}
+  m_MinSize: {x: 875, y: 300}
+  m_MaxSize: {x: 10000, y: 10000}
+  m_Maximized: 0
+--- !u!114 &2
+=======
+    x: 0
+    y: 43
+    width: 1920
+    height: 989
+  m_ShowMode: 4
+  m_Title: Project
+  m_RootView: {fileID: 9}
   m_MinSize: {x: 875, y: 300}
   m_MaxSize: {x: 10000, y: 10000}
   m_Maximized: 1
---- !u!114 &6
-MonoBehaviour:
-  m_ObjectHideFlags: 52
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 12047, guid: 0000000000000000e000000000000000, type: 0}
-  m_Name: NotificationWindow
-  m_EditorClassIdentifier: 
-  m_Children: []
-  m_Position:
-    serializedVersion: 2
-    x: 0
-    y: 0
-    width: 512
-    height: 40
-  m_MinSize: {x: 512, y: 39.90857}
-  m_MaxSize: {x: 512, y: 39.90857}
-  m_ActualView: {fileID: 23}
---- !u!114 &7
-MonoBehaviour:
-  m_ObjectHideFlags: 52
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 12006, guid: 0000000000000000e000000000000000, type: 0}
-  m_Name: GuideWindow
-  m_EditorClassIdentifier: 
-  m_Children: []
-  m_Position:
-    serializedVersion: 2
-    x: 0
-    y: 0
-    width: 780
-    height: 1126
-  m_MinSize: {x: 780, y: 1126}
-  m_MaxSize: {x: 780, y: 1126}
-  m_ActualView: {fileID: 24}
-  m_Panes:
-  - {fileID: 24}
-  m_Selected: 0
-  m_LastSelected: 0
---- !u!114 &8
-MonoBehaviour:
-  m_ObjectHideFlags: 52
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 12010, guid: 0000000000000000e000000000000000, type: 0}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  m_Children:
-  - {fileID: 7}
-  m_Position:
-    serializedVersion: 2
-    x: 0
-    y: 0
-    width: 780
-    height: 1126
-  m_MinSize: {x: 780, y: 1126}
-  m_MaxSize: {x: 780, y: 1126}
-  vertical: 0
-  controlID: 197
-  draggingID: 0
---- !u!114 &9
+--- !u!114 &4
 MonoBehaviour:
   m_ObjectHideFlags: 52
   m_CorrespondingSourceObject: {fileID: 0}
@@ -214,12 +109,12 @@ MonoBehaviour:
     height: 708
   m_MinSize: {x: 310, y: 226}
   m_MaxSize: {x: 4000, y: 4026}
-  m_ActualView: {fileID: 25}
+  m_ActualView: {fileID: 18}
   m_Panes:
-  - {fileID: 25}
+  - {fileID: 18}
   m_Selected: 0
   m_LastSelected: 0
---- !u!114 &10
+--- !u!114 &5
 MonoBehaviour:
   m_ObjectHideFlags: 52
   m_CorrespondingSourceObject: {fileID: 0}
@@ -232,7 +127,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_Children:
-  - {fileID: 9}
+  - {fileID: 4}
   m_Position:
     serializedVersion: 2
     x: 0
@@ -242,9 +137,9 @@ MonoBehaviour:
   m_MinSize: {x: 310, y: 226}
   m_MaxSize: {x: 4000, y: 4026}
   vertical: 0
-  controlID: 24
+  controlID: 12097
   draggingID: 0
---- !u!114 &11
+--- !u!114 &6
 MonoBehaviour:
   m_ObjectHideFlags: 52
   m_CorrespondingSourceObject: {fileID: 0}
@@ -261,16 +156,16 @@ MonoBehaviour:
     serializedVersion: 2
     x: 0
     y: 0
-    width: 726
+    width: 725
     height: 578
   m_MinSize: {x: 725, y: 426}
   m_MaxSize: {x: 4000, y: 4026}
-  m_ActualView: {fileID: 26}
+  m_ActualView: {fileID: 19}
   m_Panes:
-  - {fileID: 26}
+  - {fileID: 19}
   m_Selected: 0
   m_LastSelected: 0
---- !u!114 &12
+--- !u!114 &7
 MonoBehaviour:
   m_ObjectHideFlags: 52
   m_CorrespondingSourceObject: {fileID: 0}
@@ -283,19 +178,20 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_Children:
-  - {fileID: 11}
+  - {fileID: 6}
   m_Position:
     serializedVersion: 2
     x: 0
     y: 0
-    width: 726
+    width: 725
     height: 578
   m_MinSize: {x: 725, y: 426}
   m_MaxSize: {x: 4000, y: 4026}
   vertical: 0
-  controlID: 16
+  controlID: 12066
   draggingID: 0
---- !u!114 &13
+--- !u!114 &8
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
 MonoBehaviour:
   m_ObjectHideFlags: 52
   m_CorrespondingSourceObject: {fileID: 0}
@@ -310,19 +206,35 @@ MonoBehaviour:
   m_Children: []
   m_Position:
     serializedVersion: 2
-    x: 443.33334
+<<<<<<< HEAD
+    x: 331.33334
     y: 0
-    width: 1404.6666
-    height: 840
+    width: 590.6666
+    height: 750
   m_MinSize: {x: 202, y: 226}
   m_MaxSize: {x: 4002, y: 4026}
-  m_ActualView: {fileID: 27}
+  m_ActualView: {fileID: 12}
   m_Panes:
-  - {fileID: 27}
-  - {fileID: 34}
+  - {fileID: 12}
+  - {fileID: 19}
   m_Selected: 0
   m_LastSelected: 1
---- !u!114 &14
+--- !u!114 &3
+=======
+    x: 333
+    y: 0
+    width: 1053
+    height: 606
+  m_MinSize: {x: 202, y: 226}
+  m_MaxSize: {x: 4002, y: 4026}
+  m_ActualView: {fileID: 20}
+  m_Panes:
+  - {fileID: 20}
+  - {fileID: 27}
+  m_Selected: 0
+  m_LastSelected: 1
+--- !u!114 &9
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
 MonoBehaviour:
   m_ObjectHideFlags: 52
   m_CorrespondingSourceObject: {fileID: 0}
@@ -335,22 +247,37 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_Children:
-  - {fileID: 15}
-  - {fileID: 17}
-  - {fileID: 16}
+<<<<<<< HEAD
+  - {fileID: 4}
+  - {fileID: 6}
+  - {fileID: 5}
+=======
+  - {fileID: 10}
+  - {fileID: 12}
+  - {fileID: 11}
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
   m_Position:
     serializedVersion: 2
     x: 0
     y: 0
-    width: 2560
-    height: 1349.3334
+<<<<<<< HEAD
+    width: 1277.3334
+    height: 1340.6667
+=======
+    width: 1920
+    height: 989
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
   m_MinSize: {x: 875, y: 300}
   m_MaxSize: {x: 10000, y: 10000}
   m_UseTopView: 1
   m_TopViewHeight: 36
   m_UseBottomView: 1
   m_BottomViewHeight: 20
---- !u!114 &15
+<<<<<<< HEAD
+--- !u!114 &4
+=======
+--- !u!114 &10
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
 MonoBehaviour:
   m_ObjectHideFlags: 52
   m_CorrespondingSourceObject: {fileID: 0}
@@ -367,12 +294,20 @@ MonoBehaviour:
     serializedVersion: 2
     x: 0
     y: 0
-    width: 2560
+<<<<<<< HEAD
+    width: 1277.3334
+=======
+    width: 1920
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
     height: 36
   m_MinSize: {x: 0, y: 0}
   m_MaxSize: {x: 0, y: 0}
   m_LastLoadedLayoutName: 
---- !u!114 &16
+<<<<<<< HEAD
+--- !u!114 &5
+=======
+--- !u!114 &11
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
 MonoBehaviour:
   m_ObjectHideFlags: 52
   m_CorrespondingSourceObject: {fileID: 0}
@@ -388,12 +323,21 @@ MonoBehaviour:
   m_Position:
     serializedVersion: 2
     x: 0
-    y: 1329.3334
-    width: 2560
+<<<<<<< HEAD
+    y: 1320.6667
+    width: 1277.3334
     height: 20
   m_MinSize: {x: 0, y: 0}
   m_MaxSize: {x: 0, y: 0}
---- !u!114 &17
+--- !u!114 &6
+=======
+    y: 969
+    width: 1920
+    height: 20
+  m_MinSize: {x: 0, y: 0}
+  m_MaxSize: {x: 0, y: 0}
+--- !u!114 &12
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
 MonoBehaviour:
   m_ObjectHideFlags: 52
   m_CorrespondingSourceObject: {fileID: 0}
@@ -406,20 +350,36 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_Children:
-  - {fileID: 18}
-  - {fileID: 22}
+<<<<<<< HEAD
+  - {fileID: 7}
+  - {fileID: 11}
+=======
+  - {fileID: 13}
+  - {fileID: 17}
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
   m_Position:
     serializedVersion: 2
     x: 0
     y: 36
-    width: 2560
-    height: 1293.3334
+<<<<<<< HEAD
+    width: 1277.3334
+    height: 1284.6667
   m_MinSize: {x: 300, y: 100}
   m_MaxSize: {x: 24288, y: 16192}
   vertical: 0
-  controlID: 181
+  controlID: 50
   draggingID: 0
---- !u!114 &18
+--- !u!114 &7
+=======
+    width: 1920
+    height: 933
+  m_MinSize: {x: 300, y: 100}
+  m_MaxSize: {x: 24288, y: 16192}
+  vertical: 0
+  controlID: 103
+  draggingID: 0
+--- !u!114 &13
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
 MonoBehaviour:
   m_ObjectHideFlags: 52
   m_CorrespondingSourceObject: {fileID: 0}
@@ -432,20 +392,34 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_Children:
-  - {fileID: 19}
-  - {fileID: 21}
+<<<<<<< HEAD
+  - {fileID: 8}
+  - {fileID: 10}
+=======
+  - {fileID: 14}
+  - {fileID: 16}
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
   m_Position:
     serializedVersion: 2
     x: 0
     y: 0
-    width: 1848
-    height: 1293.3334
+<<<<<<< HEAD
+    width: 922
+    height: 1284.6667
+=======
+    width: 1386
+    height: 933
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
   m_MinSize: {x: 200, y: 100}
   m_MaxSize: {x: 16192, y: 16192}
   vertical: 1
-  controlID: 113
+  controlID: 51
   draggingID: 0
---- !u!114 &19
+<<<<<<< HEAD
+--- !u!114 &8
+=======
+--- !u!114 &14
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
 MonoBehaviour:
   m_ObjectHideFlags: 52
   m_CorrespondingSourceObject: {fileID: 0}
@@ -458,20 +432,34 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_Children:
-  - {fileID: 20}
-  - {fileID: 13}
+<<<<<<< HEAD
+  - {fileID: 9}
+  - {fileID: 2}
+=======
+  - {fileID: 15}
+  - {fileID: 8}
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
   m_Position:
     serializedVersion: 2
     x: 0
     y: 0
-    width: 1848
-    height: 840
+<<<<<<< HEAD
+    width: 922
+    height: 750
+=======
+    width: 1386
+    height: 606
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
   m_MinSize: {x: 200, y: 50}
   m_MaxSize: {x: 16192, y: 8096}
   vertical: 0
-  controlID: 114
+  controlID: 42
   draggingID: 0
---- !u!114 &20
+<<<<<<< HEAD
+--- !u!114 &9
+=======
+--- !u!114 &15
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
 MonoBehaviour:
   m_ObjectHideFlags: 52
   m_CorrespondingSourceObject: {fileID: 0}
@@ -488,16 +476,29 @@ MonoBehaviour:
     serializedVersion: 2
     x: 0
     y: 0
-    width: 443.33334
-    height: 840
+<<<<<<< HEAD
+    width: 331.33334
+    height: 750
   m_MinSize: {x: 201, y: 226}
   m_MaxSize: {x: 4001, y: 4026}
-  m_ActualView: {fileID: 28}
+  m_ActualView: {fileID: 13}
   m_Panes:
-  - {fileID: 28}
+  - {fileID: 13}
   m_Selected: 0
   m_LastSelected: 0
---- !u!114 &21
+--- !u!114 &10
+=======
+    width: 333
+    height: 606
+  m_MinSize: {x: 201, y: 226}
+  m_MaxSize: {x: 4001, y: 4026}
+  m_ActualView: {fileID: 21}
+  m_Panes:
+  - {fileID: 21}
+  m_Selected: 0
+  m_LastSelected: 0
+--- !u!114 &16
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
 MonoBehaviour:
   m_ObjectHideFlags: 52
   m_CorrespondingSourceObject: {fileID: 0}
@@ -513,20 +514,37 @@ MonoBehaviour:
   m_Position:
     serializedVersion: 2
     x: 0
-    y: 840
-    width: 1848
-    height: 453.33337
+<<<<<<< HEAD
+    y: 750
+    width: 922
+    height: 534.66675
   m_MinSize: {x: 231, y: 276}
   m_MaxSize: {x: 10001, y: 10026}
-  m_ActualView: {fileID: 29}
+  m_ActualView: {fileID: 14}
   m_Panes:
-  - {fileID: 29}
-  - {fileID: 30}
-  - {fileID: 31}
-  - {fileID: 32}
+  - {fileID: 14}
+  - {fileID: 15}
+  - {fileID: 16}
+  - {fileID: 17}
   m_Selected: 0
   m_LastSelected: 1
---- !u!114 &22
+--- !u!114 &11
+=======
+    y: 606
+    width: 1386
+    height: 327
+  m_MinSize: {x: 231, y: 276}
+  m_MaxSize: {x: 10001, y: 10026}
+  m_ActualView: {fileID: 22}
+  m_Panes:
+  - {fileID: 22}
+  - {fileID: 23}
+  - {fileID: 24}
+  - {fileID: 25}
+  m_Selected: 0
+  m_LastSelected: 1
+--- !u!114 &17
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
 MonoBehaviour:
   m_ObjectHideFlags: 52
   m_CorrespondingSourceObject: {fileID: 0}
@@ -541,113 +559,32 @@ MonoBehaviour:
   m_Children: []
   m_Position:
     serializedVersion: 2
-    x: 1848
+<<<<<<< HEAD
+    x: 922
     y: 0
-    width: 712
-    height: 1293.3334
+    width: 355.33337
+    height: 1284.6667
   m_MinSize: {x: 276, y: 76}
   m_MaxSize: {x: 4001, y: 4026}
-  m_ActualView: {fileID: 33}
+  m_ActualView: {fileID: 18}
   m_Panes:
-  - {fileID: 33}
+  - {fileID: 18}
   m_Selected: 0
   m_LastSelected: 0
---- !u!114 &23
-MonoBehaviour:
-  m_ObjectHideFlags: 52
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: e4b4062cd73988141853fd5cff932529, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  m_MinSize: {x: 512, y: 39.90857}
-  m_MaxSize: {x: 512, y: 39.90857}
-  m_TitleContent:
-    m_Text: Meta.XR.Editor.Notifications.NotificationWindow
-    m_Image: {fileID: 0}
-    m_Tooltip: 
-    m_TextWithWhitespace: "Meta.XR.Editor.Notifications.NotificationWindow\u200B"
-  m_Pos:
-    serializedVersion: 2
-    x: 0
+--- !u!114 &12
+=======
+    x: 1386
     y: 0
-    width: 512
-    height: 40
-  m_SerializedDataModeController:
-    m_DataMode: 0
-    m_PreferredDataMode: 0
-    m_SupportedDataModes: 
-    isAutomatic: 1
-  m_ViewDataDictionary: {fileID: 0}
-  m_OverlayCanvas:
-    m_LastAppliedPresetName: Default
-    m_SaveData: []
-    m_ContainerData: []
-    m_OverlaysVisible: 1
---- !u!114 &24
-MonoBehaviour:
-  m_ObjectHideFlags: 52
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 339771a46ab5419eb88428d1a307f935, type: 3}
-  m_Name: Welcome to Meta XR SDK
-  m_EditorClassIdentifier: 
-  m_MinSize: {x: 780, y: 1100}
-  m_MaxSize: {x: 780, y: 1100}
-  m_TitleContent:
-    m_Text: Welcome to Meta XR SDK
-    m_Image: {fileID: 0}
-    m_Tooltip: 
-    m_TextWithWhitespace: "Welcome to Meta XR SDK\u200B"
-  m_Pos:
-    serializedVersion: 2
-    x: 0
-    y: 26
-    width: 780
-    height: 1100
-  m_SerializedDataModeController:
-    m_DataMode: 0
-    m_PreferredDataMode: 0
-    m_SupportedDataModes: 
-    isAutomatic: 1
-  m_ViewDataDictionary: {fileID: 0}
-  m_OverlayCanvas:
-    m_LastAppliedPresetName: Default
-    m_SaveData: []
-    m_ContainerData: []
-    m_OverlaysVisible: 1
-  _title: Welcome to Meta XR SDK
-  _description: 
-  _guideOptions:
-    ShowCloseButton: 1
-    ShowDontShowAgainOption: 1
-    InvertDontShowAgain: 1
-    OverrideDontShowAgainContent:
-      m_Text: Show on Startup
-      m_Image: {fileID: 0}
-      m_Tooltip: 
-      m_TextWithWhitespace: "Show on Startup\u200B"
-    MinWindowWidth: 780
-    MaxWindowWidth: 780
-    MinWindowHeight: 1100
-    MaxWindowHeight: 1100
-    HeaderImage:
-      _name: ovr_develop.jpg
-      _category:
-        _path: Guide/Textures
-        _isFullPath: 0
-      _tooltip: 
-    HeaderHeight: 192
-  _populatorId: Meta.XR.Guides.Editor.AboutGuidedSetup
---- !u!114 &25
+    width: 534
+    height: 933
+  m_MinSize: {x: 276, y: 76}
+  m_MaxSize: {x: 4001, y: 4026}
+  m_ActualView: {fileID: 26}
+  m_Panes:
+  - {fileID: 26}
+  m_Selected: 0
+  m_LastSelected: 0
+--- !u!114 &18
 MonoBehaviour:
   m_ObjectHideFlags: 52
   m_CorrespondingSourceObject: {fileID: 0}
@@ -663,7 +600,7 @@ MonoBehaviour:
   m_MaxSize: {x: 4000, y: 4000}
   m_TitleContent:
     m_Text: Project Settings
-    m_Image: {fileID: 866346219090771560, guid: 0000000000000000d000000000000000, type: 0}
+    m_Image: {fileID: -5712115415447495865, guid: 0000000000000000d000000000000000, type: 0}
     m_Tooltip: 
     m_TextWithWhitespace: "Project Settings\u200B"
   m_Pos:
@@ -684,15 +621,15 @@ MonoBehaviour:
     m_ContainerData: []
     m_OverlaysVisible: 1
   m_PosLeft: {x: 0, y: 0}
-  m_PosRight: {x: 0, y: 0}
+  m_PosRight: {x: 0, y: 1727.242}
   m_Scope: 1
-  m_SplitterFlex: 0
+  m_SplitterFlex: 0.2
   m_SearchText: 
   m_TreeViewState:
     scrollPos: {x: 0, y: 0}
-    m_SelectedIDs: 210c6503
-    m_LastClickedID: 56953889
-    m_ExpandedIDs: a01a5fa667ea4eb100000000210c65037f0eae07e594f01a4f0a7f2e
+    m_SelectedIDs: 4dcf9b58
+    m_LastClickedID: 1486606157
+    m_ExpandedIDs: 00000000210c65037f0eae07e594f01a4f0a7f2e
     m_RenameOverlay:
       m_UserAcceptedRename: 0
       m_Name: 
@@ -711,7 +648,7 @@ MonoBehaviour:
       m_TrimLeadingAndTrailingWhitespace: 0
       m_ClientGUIView: {fileID: 0}
     m_SearchString: 
---- !u!114 &26
+--- !u!114 &19
 MonoBehaviour:
   m_ObjectHideFlags: 52
   m_CorrespondingSourceObject: {fileID: 0}
@@ -734,7 +671,7 @@ MonoBehaviour:
     serializedVersion: 2
     x: 0
     y: 26
-    width: 726
+    width: 725
     height: 552
   m_SerializedDataModeController:
     m_DataMode: 0
@@ -747,7 +684,8 @@ MonoBehaviour:
     m_SaveData: []
     m_ContainerData: []
     m_OverlaysVisible: 1
---- !u!114 &27
+--- !u!114 &20
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
 MonoBehaviour:
   m_ObjectHideFlags: 52
   m_CorrespondingSourceObject: {fileID: 0}
@@ -763,15 +701,22 @@ MonoBehaviour:
   m_MaxSize: {x: 4000, y: 4000}
   m_TitleContent:
     m_Text: Scene
-    m_Image: {fileID: 8634526014445323508, guid: 0000000000000000d000000000000000, type: 0}
+    m_Image: {fileID: 2593428753322112591, guid: 0000000000000000d000000000000000, type: 0}
     m_Tooltip: 
     m_TextWithWhitespace: "Scene\u200B"
   m_Pos:
     serializedVersion: 2
-    x: 444.33334
+<<<<<<< HEAD
+    x: 1612.6667
+    y: 86
+    width: 588.6666
+    height: 724
+=======
+    x: 334
     y: 24
-    width: 1402.6666
-    height: 814
+    width: 1051
+    height: 580
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
   m_SerializedDataModeController:
     m_DataMode: 0
     m_PreferredDataMode: 0
@@ -842,10 +787,10 @@ MonoBehaviour:
       displayed: 1
       id: unity-transform-toolbar
       index: 0
-      contents: '{"m_Layout":2,"m_Collapsed":false,"m_Floating":false,"m_FloatingSnapOffset":{"x":24.0,"y":25.333332061767579},"m_SnapOffsetDelta":{"x":0.0,"y":0.0},"m_FloatingSnapCorner":0,"m_Size":{"x":0.0,"y":0.0},"m_SizeOverridden":false}'
+      contents: '{"m_Layout":2,"m_Collapsed":false,"m_Floating":false,"m_FloatingSnapOffset":{"x":24.0,"y":26.666667938232423},"m_SnapOffsetDelta":{"x":0.0,"y":0.0},"m_FloatingSnapCorner":0,"m_Size":{"x":0.0,"y":0.0},"m_SizeOverridden":false}'
       floating: 0
       collapsed: 0
-      snapOffset: {x: 24, y: 25.333332}
+      snapOffset: {x: 24, y: 26.666668}
       snapOffsetDelta: {x: 0, y: 0}
       snapCorner: 0
       layout: 2
@@ -870,12 +815,12 @@ MonoBehaviour:
       displayed: 1
       id: Orientation
       index: 0
-      contents: '{"m_Layout":4,"m_Collapsed":false,"m_Floating":false,"m_FloatingSnapOffset":{"x":67.5,"y":86.0},"m_SnapOffsetDelta":{"x":0.0,"y":0.0},"m_FloatingSnapCorner":0,"m_Size":{"x":0.0,"y":0.0},"m_SizeOverridden":false}'
+      contents: '{"m_Layout":4,"m_Collapsed":false,"m_Floating":false,"m_FloatingSnapOffset":{"x":-112.0,"y":26.666667938232423},"m_SnapOffsetDelta":{"x":0.0,"y":0.0},"m_FloatingSnapCorner":1,"m_Size":{"x":0.0,"y":0.0},"m_SizeOverridden":false}'
       floating: 0
       collapsed: 0
-      snapOffset: {x: 67.5, y: 86}
+      snapOffset: {x: -112, y: 26.666668}
       snapOffsetDelta: {x: 0, y: 0}
-      snapCorner: 0
+      snapCorner: 1
       layout: 4
       size: {x: 0, y: 0}
       sizeOverridden: 0
@@ -1333,7 +1278,7 @@ MonoBehaviour:
         m_Value: 0
       m_Color: {r: 0.5, g: 0.5, b: 0.5, a: 0.4}
       m_Pivot: {x: 0, y: 0, z: 0}
-      m_Size: {x: 0.1, y: 0.1}
+      m_Size: {x: 1, y: 1}
     zGrid:
       m_Fade:
         m_Target: 0
@@ -1348,7 +1293,7 @@ MonoBehaviour:
   m_Rotation:
     m_Target: {x: 0.04528589, y: 0.85734665, z: 0.07648967, w: -0.507185}
     speed: 2
-    m_Value: {x: 0.04528589, y: 0.85734665, z: 0.07648967, w: -0.507185}
+    m_Value: {x: 0.04478999, y: 0.8538486, z: 0.07445621, w: -0.513218}
   m_Size:
     m_Target: 335.4102
     speed: 2
@@ -1373,7 +1318,11 @@ MonoBehaviour:
   m_LastSceneViewRotation: {x: 0, y: 0, z: 0, w: 0}
   m_LastSceneViewOrtho: 0
   m_Viewpoint:
-    m_SceneView: {fileID: 27}
+<<<<<<< HEAD
+    m_SceneView: {fileID: 12}
+=======
+    m_SceneView: {fileID: 20}
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
     m_CameraOverscanSettings:
       m_Opacity: 50
       m_Scale: 1
@@ -1381,12 +1330,13 @@ MonoBehaviour:
   m_ReplacementString: 
   m_SceneVisActive: 1
   m_LastLockedObject: {fileID: 0}
-  m_LastDebugDrawMode:
-    drawMode: 35
-    name: Contributors / Receivers
-    section: Lighting
+  m_LastDebugDrawMode: 35
   m_ViewIsLockedToObject: 0
---- !u!114 &28
+<<<<<<< HEAD
+--- !u!114 &13
+=======
+--- !u!114 &21
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
 MonoBehaviour:
   m_ObjectHideFlags: 52
   m_CorrespondingSourceObject: {fileID: 0}
@@ -1402,15 +1352,22 @@ MonoBehaviour:
   m_MaxSize: {x: 4000, y: 4000}
   m_TitleContent:
     m_Text: Hierarchy
-    m_Image: {fileID: -3734745235275155857, guid: 0000000000000000d000000000000000, type: 0}
+    m_Image: {fileID: 7966133145522015247, guid: 0000000000000000d000000000000000, type: 0}
     m_Tooltip: 
     m_TextWithWhitespace: "Hierarchy\u200B"
   m_Pos:
     serializedVersion: 2
+<<<<<<< HEAD
+    x: 1281.3334
+    y: 86
+    width: 330.33334
+    height: 724
+=======
     x: 0
     y: 24
-    width: 442.33334
-    height: 814
+    width: 332
+    height: 580
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
   m_SerializedDataModeController:
     m_DataMode: 0
     m_PreferredDataMode: 0
@@ -1427,7 +1384,11 @@ MonoBehaviour:
       scrollPos: {x: 0, y: 0}
       m_SelectedIDs: 
       m_LastClickedID: 0
-      m_ExpandedIDs: ded1fbff
+<<<<<<< HEAD
+      m_ExpandedIDs: c6e6feffdee6feffd6eefeff2805ffff4005ffff380dffff3221ffff4a21ffff4229ffff3045ffff4845ffff404dffffba62ffffd262ffffca6affffa27effffba7effffb286ffffaa9cffffc29cffffbaa4ffffd6b9ffffeeb9ffffe6c1ffff10d7ffff28d7ffff52dfffff84ebffff16fbffff70df00007adf000092df0000ecdf00000a13010014130100241301003013010092130100741601007e1601008e1601009a160100fc160100e6190100021a0100641a0100c8260100d2260100e2260100ee26010050270100322a01003c2a0100582a0100ba2a0100862d0100902d0100a82d0100022e0100b0300100ba300100d23001003431010008340100123401002a3401008c340100
+=======
+      m_ExpandedIDs: 8c2cffff16fbfffff0db0000
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
       m_RenameOverlay:
         m_UserAcceptedRename: 0
         m_Name: 
@@ -1444,7 +1405,11 @@ MonoBehaviour:
         m_OriginalEventType: 11
         m_IsRenamingFilename: 0
         m_TrimLeadingAndTrailingWhitespace: 0
-        m_ClientGUIView: {fileID: 20}
+<<<<<<< HEAD
+        m_ClientGUIView: {fileID: 9}
+=======
+        m_ClientGUIView: {fileID: 15}
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
       m_SearchString: 
     m_ExpandedScenes: []
     m_CurrenRootInstanceID: 0
@@ -1452,7 +1417,11 @@ MonoBehaviour:
       m_IsLocked: 0
     m_CurrentSortingName: TransformSorting
   m_WindowGUID: 4c969a2b90040154d917609493e03593
---- !u!114 &29
+<<<<<<< HEAD
+--- !u!114 &14
+=======
+--- !u!114 &22
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
 MonoBehaviour:
   m_ObjectHideFlags: 52
   m_CorrespondingSourceObject: {fileID: 0}
@@ -1468,15 +1437,22 @@ MonoBehaviour:
   m_MaxSize: {x: 10000, y: 10000}
   m_TitleContent:
     m_Text: Project
-    m_Image: {fileID: -5179483145760003458, guid: 0000000000000000d000000000000000, type: 0}
+    m_Image: {fileID: -5467254957812901981, guid: 0000000000000000d000000000000000, type: 0}
     m_Tooltip: 
     m_TextWithWhitespace: "Project\u200B"
   m_Pos:
     serializedVersion: 2
+<<<<<<< HEAD
+    x: 1281.3334
+    y: 836
+    width: 921
+    height: 508.66675
+=======
     x: 0
-    y: 864
-    width: 1847
-    height: 427.33337
+    y: 630
+    width: 1385
+    height: 301
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
   m_SerializedDataModeController:
     m_DataMode: 0
     m_PreferredDataMode: 0
@@ -1489,7 +1465,7 @@ MonoBehaviour:
     m_ContainerData: []
     m_OverlaysVisible: 1
   m_SearchFilter:
-    m_NameFilter: 
+    m_NameFilter: pass
     m_ClassNames: []
     m_AssetLabels: []
     m_AssetBundleNames: []
@@ -1497,28 +1473,43 @@ MonoBehaviour:
     m_SceneHandles: 
     m_ShowAllHits: 0
     m_SkipHidden: 0
-    m_SearchArea: 1
+    m_SearchArea: 0
     m_Folders:
-    - Assets
+<<<<<<< HEAD
+    - Packages
+=======
+    - Assets/Plugins/Android
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
     m_Globs: []
     m_ProductIds: 
     m_AnyWithAssetOrigin: 0
-    m_OriginalText: 
+    m_OriginalText: pass
     m_ImportLogFlags: 0
     m_FilterByTypeIntersection: 0
   m_ViewMode: 1
   m_StartGridSize: 16
   m_LastFolders:
-  - Assets
+<<<<<<< HEAD
+  - Packages
+=======
+  - Assets/Plugins/Android
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
   m_LastFoldersGridSize: 16
-  m_LastProjectPath: C:\Users\netla\Desktop\25_winter_project\xr-image-segmentation
+  m_LastProjectPath: C:\Unity\xr-image-segmentation
   m_LockTracker:
     m_IsLocked: 0
   m_FolderTreeState:
-    scrollPos: {x: 0, y: 79}
-    m_SelectedIDs: c6390300
-    m_LastClickedID: 211398
-    m_ExpandedIDs: 0000000062e00000
+<<<<<<< HEAD
+    scrollPos: {x: 0, y: 137.33331}
+    m_SelectedIDs: ffffff7f
+    m_LastClickedID: 2147483647
+    m_ExpandedIDs: 000000005ce00000a6e20000fee2000000ca9a3bffffff7f
+=======
+    scrollPos: {x: 0, y: 120}
+    m_SelectedIDs: 083b0100
+    m_LastClickedID: 80648
+    m_ExpandedIDs: 0000000016dd000018dd00001add00001cdd00001edd0000
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
     m_RenameOverlay:
       m_UserAcceptedRename: 0
       m_Name: 
@@ -1535,7 +1526,11 @@ MonoBehaviour:
       m_OriginalEventType: 11
       m_IsRenamingFilename: 1
       m_TrimLeadingAndTrailingWhitespace: 0
-      m_ClientGUIView: {fileID: 21}
+<<<<<<< HEAD
+      m_ClientGUIView: {fileID: 10}
+=======
+      m_ClientGUIView: {fileID: 16}
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
     m_SearchString: 
     m_CreateAssetUtility:
       m_EndAction: {fileID: 0}
@@ -1547,7 +1542,11 @@ MonoBehaviour:
     scrollPos: {x: 0, y: 0}
     m_SelectedIDs: 
     m_LastClickedID: 0
-    m_ExpandedIDs: 0000000062e00000
+<<<<<<< HEAD
+    m_ExpandedIDs: 000000005ce00000
+=======
+    m_ExpandedIDs: 0000000016dd000018dd00001add00001cdd00001edd0000
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
     m_RenameOverlay:
       m_UserAcceptedRename: 0
       m_Name: 
@@ -1575,7 +1574,7 @@ MonoBehaviour:
   m_ListAreaState:
     m_SelectedInstanceIDs: 
     m_LastClickedInstanceID: 0
-    m_HadKeyboardFocusLastEvent: 0
+    m_HadKeyboardFocusLastEvent: 1
     m_ExpandedInstanceIDs: c6230000beaf000074a00100beb201007eb4010014b50100d89f0100eea8000000000000
     m_RenameOverlay:
       m_UserAcceptedRename: 0
@@ -1593,7 +1592,11 @@ MonoBehaviour:
       m_OriginalEventType: 11
       m_IsRenamingFilename: 1
       m_TrimLeadingAndTrailingWhitespace: 0
-      m_ClientGUIView: {fileID: 21}
+<<<<<<< HEAD
+      m_ClientGUIView: {fileID: 10}
+=======
+      m_ClientGUIView: {fileID: 16}
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
     m_CreateAssetUtility:
       m_EndAction: {fileID: 0}
       m_InstanceID: 0
@@ -1605,7 +1608,11 @@ MonoBehaviour:
     m_GridSize: 16
   m_SkipHiddenPackages: 0
   m_DirectoriesAreaWidth: 265
---- !u!114 &30
+<<<<<<< HEAD
+--- !u!114 &15
+=======
+--- !u!114 &23
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
 MonoBehaviour:
   m_ObjectHideFlags: 52
   m_CorrespondingSourceObject: {fileID: 0}
@@ -1621,15 +1628,15 @@ MonoBehaviour:
   m_MaxSize: {x: 4000, y: 4000}
   m_TitleContent:
     m_Text: Console
-    m_Image: {fileID: -4950941429401207979, guid: 0000000000000000d000000000000000, type: 0}
+    m_Image: {fileID: -4327648978806127646, guid: 0000000000000000d000000000000000, type: 0}
     m_Tooltip: 
     m_TextWithWhitespace: "Console\u200B"
   m_Pos:
     serializedVersion: 2
-    x: 0
-    y: 685
-    width: 1385
-    height: 301
+    x: 1281.3334
+    y: 553.3334
+    width: 921
+    height: 307.33334
   m_SerializedDataModeController:
     m_DataMode: 0
     m_PreferredDataMode: 0
@@ -1641,7 +1648,11 @@ MonoBehaviour:
     m_SaveData: []
     m_ContainerData: []
     m_OverlaysVisible: 1
---- !u!114 &31
+<<<<<<< HEAD
+--- !u!114 &16
+=======
+--- !u!114 &24
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
 MonoBehaviour:
   m_ObjectHideFlags: 52
   m_CorrespondingSourceObject: {fileID: 0}
@@ -1657,15 +1668,15 @@ MonoBehaviour:
   m_MaxSize: {x: 4000, y: 4000}
   m_TitleContent:
     m_Text: Audio Mixer
-    m_Image: {fileID: -3283902137440876849, guid: 0000000000000000d000000000000000, type: 0}
+    m_Image: {fileID: 2344599766593239149, guid: 0000000000000000d000000000000000, type: 0}
     m_Tooltip: 
     m_TextWithWhitespace: "Audio Mixer\u200B"
   m_Pos:
     serializedVersion: 2
-    x: -1920
-    y: 633
-    width: 1464
-    height: 362
+    x: 1.3333334
+    y: 836
+    width: 921
+    height: 508.66675
   m_SerializedDataModeController:
     m_DataMode: 0
     m_PreferredDataMode: 0
@@ -1797,12 +1808,12 @@ MonoBehaviour:
       oldMaxSizes: 
       oldSplitSize: 0
     m_HorizontalSplitter:
-      ID: 70
+      ID: 3674
       splitterInitialOffset: 0
       currentActiveSplitter: -1
       realSizes:
-      - 439
-      - 1025
+      - 276.6666
+      - 644.6667
       relativeSizes:
       - 0.3
       - 0.7
@@ -1812,7 +1823,7 @@ MonoBehaviour:
       maxSizes:
       - 0
       - 0
-      lastTotalSize: 1464
+      lastTotalSize: 921.3333
       splitSize: 6
       xOffset: 0
       m_Version: 1
@@ -1826,7 +1837,11 @@ MonoBehaviour:
   m_ShowReferencedBuses: 1
   m_ShowBusConnections: 0
   m_ShowBusConnectionsOfSelection: 0
---- !u!114 &32
+<<<<<<< HEAD
+--- !u!114 &17
+=======
+--- !u!114 &25
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
 MonoBehaviour:
   m_ObjectHideFlags: 52
   m_CorrespondingSourceObject: {fileID: 0}
@@ -1842,15 +1857,15 @@ MonoBehaviour:
   m_MaxSize: {x: 4000, y: 4000}
   m_TitleContent:
     m_Text: Animator
-    m_Image: {fileID: 1711060831702674872, guid: 0000000000000000d000000000000000, type: 0}
+    m_Image: {fileID: -1673928668082335149, guid: 0000000000000000d000000000000000, type: 0}
     m_Tooltip: 
     m_TextWithWhitespace: "Animator\u200B"
   m_Pos:
     serializedVersion: 2
-    x: 0
-    y: 685
-    width: 1441
-    height: 301
+    x: 1.3333334
+    y: 836
+    width: 921
+    height: 508.66675
   m_SerializedDataModeController:
     m_DataMode: 0
     m_PreferredDataMode: 0
@@ -1863,11 +1878,30 @@ MonoBehaviour:
     m_ContainerData: []
     m_OverlaysVisible: 1
   m_ViewTransforms:
-    m_KeySerializationHelper: []
-    m_ValueSerializationHelper: []
+    m_KeySerializationHelper:
+    - {fileID: 3203172643932214381, guid: 5681c1c9f440c3a489f89414b20ced3c, type: 2}
+    m_ValueSerializationHelper:
+    - e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
   m_PreviewAnimator: {fileID: 0}
-  m_AnimatorController: {fileID: 0}
-  m_BreadCrumbs: []
+  m_AnimatorController: {fileID: 9100000, guid: 5681c1c9f440c3a489f89414b20ced3c, type: 2}
+  m_BreadCrumbs:
+  - m_Target: {fileID: 3203172643932214381, guid: 5681c1c9f440c3a489f89414b20ced3c, type: 2}
+    m_ScrollPosition: {x: 0, y: 0}
   stateMachineGraph: {fileID: 0}
   stateMachineGraphGUI: {fileID: 0}
   blendTreeGraph: {fileID: 0}
@@ -1879,7 +1913,11 @@ MonoBehaviour:
   m_CurrentEditor: 1
   m_LayerEditor:
     m_SelectedLayerIndex: 0
---- !u!114 &33
+<<<<<<< HEAD
+--- !u!114 &18
+=======
+--- !u!114 &26
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
 MonoBehaviour:
   m_ObjectHideFlags: 52
   m_CorrespondingSourceObject: {fileID: 0}
@@ -1895,15 +1933,22 @@ MonoBehaviour:
   m_MaxSize: {x: 4000, y: 4000}
   m_TitleContent:
     m_Text: Inspector
-    m_Image: {fileID: -440750813802333266, guid: 0000000000000000d000000000000000, type: 0}
+    m_Image: {fileID: -2667387946076563598, guid: 0000000000000000d000000000000000, type: 0}
     m_Tooltip: 
     m_TextWithWhitespace: "Inspector\u200B"
   m_Pos:
     serializedVersion: 2
-    x: 1849
+<<<<<<< HEAD
+    x: 2203.3335
+    y: 86
+    width: 354.33337
+    height: 1258.6667
+=======
+    x: 1387
     y: 24
-    width: 711
-    height: 1267.3334
+    width: 533
+    height: 907
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
   m_SerializedDataModeController:
     m_DataMode: 0
     m_PreferredDataMode: 0
@@ -1928,7 +1973,11 @@ MonoBehaviour:
   m_LockTracker:
     m_IsLocked: 0
   m_PreviewWindow: {fileID: 0}
---- !u!114 &34
+<<<<<<< HEAD
+--- !u!114 &19
+=======
+--- !u!114 &27
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
 MonoBehaviour:
   m_ObjectHideFlags: 52
   m_CorrespondingSourceObject: {fileID: 0}
@@ -1944,15 +1993,15 @@ MonoBehaviour:
   m_MaxSize: {x: 4000, y: 4000}
   m_TitleContent:
     m_Text: Game
-    m_Image: {fileID: 4621777727084837110, guid: 0000000000000000d000000000000000, type: 0}
+    m_Image: {fileID: -6423792434712278376, guid: 0000000000000000d000000000000000, type: 0}
     m_Tooltip: 
     m_TextWithWhitespace: "Game\u200B"
   m_Pos:
     serializedVersion: 2
-    x: 348
-    y: 79
-    width: 1098
-    height: 580
+    x: 1612.6667
+    y: 86
+    width: 588.6666
+    height: 441.33334
   m_SerializedDataModeController:
     m_DataMode: 0
     m_PreferredDataMode: 0
@@ -1972,7 +2021,7 @@ MonoBehaviour:
   m_ShowGizmos: 0
   m_TargetDisplay: 0
   m_ClearColor: {r: 0, g: 0, b: 0, a: 0}
-  m_TargetSize: {x: 1647, y: 838.5}
+  m_TargetSize: {x: 882.99994, y: 630.5}
   m_TextureFilterMode: 0
   m_TextureHideFlags: 61
   m_RenderIMGUI: 1
@@ -1987,17 +2036,24 @@ MonoBehaviour:
     m_VRangeLocked: 0
     hZoomLockedByDefault: 0
     vZoomLockedByDefault: 0
+<<<<<<< HEAD
+    m_HBaseRangeMin: -294.3333
+    m_HBaseRangeMax: 294.3333
+    m_VBaseRangeMin: -210.16667
+    m_VBaseRangeMax: 210.16667
+=======
     m_HBaseRangeMin: -549
     m_HBaseRangeMax: 549
     m_VBaseRangeMin: -279.5
     m_VBaseRangeMax: 279.5
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
     m_HAllowExceedBaseRangeMin: 1
     m_HAllowExceedBaseRangeMax: 1
     m_VAllowExceedBaseRangeMin: 1
     m_VAllowExceedBaseRangeMax: 1
     m_ScaleWithWindow: 0
-    m_HSlider: 0
-    m_VSlider: 0
+    m_HSlider: 1
+    m_VSlider: 1
     m_IgnoreScrollWheelUntilClicked: 0
     m_EnableMouseInput: 1
     m_EnableSliderZoomHorizontal: 0
@@ -2008,23 +2064,40 @@ MonoBehaviour:
       serializedVersion: 2
       x: 0
       y: 21
+<<<<<<< HEAD
+      width: 588.6666
+      height: 420.33334
+    m_Scale: {x: 1.5, y: 1.5}
+    m_Translation: {x: 294.3333, y: 210.16667}
+=======
       width: 1098
       height: 559
-    m_Scale: {x: 1.5, y: 1.5}
+    m_Scale: {x: 1, y: 1}
     m_Translation: {x: 549, y: 279.5}
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
     m_MarginLeft: 0
     m_MarginRight: 0
     m_MarginTop: 0
     m_MarginBottom: 0
     m_LastShownAreaInsideMargins:
       serializedVersion: 2
-      x: -366
-      y: -186.33333
-      width: 732
-      height: 372.66666
+<<<<<<< HEAD
+      x: -196.22221
+      y: -140.11111
+      width: 392.44443
+      height: 280.22223
     m_MinimalGUI: 1
   m_defaultScale: 1
-  m_LastWindowPixelSize: {x: 1647, y: 870}
+  m_LastWindowPixelSize: {x: 882.99994, y: 662}
+=======
+      x: -549
+      y: -279.5
+      width: 1098
+      height: 559
+    m_MinimalGUI: 1
+  m_defaultScale: 1
+  m_LastWindowPixelSize: {x: 1098, y: 580}
+>>>>>>> parent of 8dc2892 (20260121 21 27: tracking하는 bbbox filtering완)
   m_ClearInEditMode: 1
   m_NoCameraWarning: 1
   m_LowResolutionForAspectRatios: 01000000000000000000

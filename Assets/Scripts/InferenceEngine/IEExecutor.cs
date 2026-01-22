@@ -3,8 +3,8 @@ using System.Collections;
 using System.Collections.Generic;
 using Unity.InferenceEngine;
 using UnityEngine;
-using UnityEngine.Rendering; 
-using Meta.XR.EnvironmentDepth; 
+using UnityEngine.Rendering;
+using Meta.XR.EnvironmentDepth;
 
 public class IEExecutor : MonoBehaviour
 {
@@ -23,9 +23,9 @@ public class IEExecutor : MonoBehaviour
 
     [Header("Model Settings")]
     [SerializeField] private Vector2Int _inputSize = new(640, 640);
-    [SerializeField] private BackendType _backend = BackendType.GPUCompute; 
+    [SerializeField] private BackendType _backend = BackendType.GPUCompute;
     [SerializeField] private ModelAsset _sentisModel;
-    [SerializeField] private int _layersPerFrame = 12; 
+    [SerializeField] private int _layersPerFrame = 12;
     [SerializeField] private float _confidenceThreshold = 0.5f;
     [SerializeField] private Transform _displayLocation;
 
@@ -33,24 +33,24 @@ public class IEExecutor : MonoBehaviour
     [SerializeField] private int _maxLostFrames = 15;
     [SerializeField] private float _minIoUThreshold = 0.3f;
     [SerializeField] private float _minSmoothTime = 0.03f;
-    [SerializeField] private float _maxSmoothTime = 0.2f; 
-    [SerializeField] private float _sizeSmoothTime = 0.3f; 
+    [SerializeField] private float _maxSmoothTime = 0.2f;
+    [SerializeField] private float _sizeSmoothTime = 0.3f;
 
     [Header("RGB-D & Depth Settings")]
     [SerializeField] private EnvironmentDepthManager _depthManager;
     [SerializeField] private PassthroughCameraSamples.WebCamTextureManager _webCamManager;
     [SerializeField] private bool _captureRGBD = true;
-    [SerializeField] private int _maxPoints = 8000; 
+    [SerializeField] private int _maxPoints = 8000;
 
     [Header("Optimization Settings")]
     [Range(2, 8)]
-    [SerializeField] private int _samplingStep = 4; 
+    [SerializeField] private int _samplingStep = 4;
 
     public struct RGBDPoint {
         public Vector3 worldPos;
         public Color32 color;
     }
-    public RGBDPoint[] PointBuffer; 
+    public RGBDPoint[] PointBuffer;
     public int CurrentPointCount { get; private set; }
 
     public bool IsModelLoaded { get; private set; } = false;
@@ -68,7 +68,7 @@ public class IEExecutor : MonoBehaviour
     private Tensor<int> _output1LabelIds;
     private Tensor<float> _output2Masks;
     private Tensor<float> _output3MaskWeights;
-    
+
     private Texture2D _cpuDepthTex;
     private bool _isDepthReadingBack = false;
     private Color32[] _rgbPixelCache;
@@ -80,7 +80,7 @@ public class IEExecutor : MonoBehaviour
     private BoundingBox? _lockedTargetBox = null;
     private bool _isTracking = false;
     private int _consecutiveLostFrames = 0;
-    
+
     private Vector2 _centerVelocity;
     private Vector2 _sizeVelocity;
     private float _currentSmoothTime;
@@ -88,6 +88,10 @@ public class IEExecutor : MonoBehaviour
     private bool _started = false;
     private bool _isWaitingForReadbackRequest = false;
     private List<BoundingBox> _currentFrameBoxes = new();
+
+    // IEDepthManager 등 외부에서 접근하는 프로퍼티
+    public bool IsTracking => _isTracking;
+    public BoundingBox? LockedTargetBox => _lockedTargetBox;
 
     private void Awake()
     {
@@ -148,7 +152,6 @@ public class IEExecutor : MonoBehaviour
         }
     }
 
-    // [추가] 외부 트리거 스크립트 에러 해결을 위한 함수
     public bool IsRunning() => _started;
 
     private void LoadModel()
@@ -200,13 +203,11 @@ public class IEExecutor : MonoBehaviour
 
     private void ProcessSuccessState()
     {
-        // 1. IEBoxer로부터 현재 프레임의 모든 박스 데이터를 가져옵니다.
         List<BoundingBox> currentFrameBoxes = _ieBoxer.DrawBoxes(_output0BoxCoords, _output1LabelIds, _inputSize.x, _inputSize.y);
         _currentFrameBoxes = currentFrameBoxes;
 
         if (_isTracking && _lockedTargetBox.HasValue)
         {
-            // [박스 증식 해결] 추적 중일 때는 IEBoxer가 그린 모든 중복 박스들을 즉시 숨깁니다.
             _ieBoxer.ClearBoxes(0);
 
             float bestScore = 0f;
@@ -214,12 +215,11 @@ public class IEExecutor : MonoBehaviour
             BoundingBox bestBox = default;
             Vector2 prevCenter = new Vector2(_lockedTargetBox.Value.CenterX, _lockedTargetBox.Value.CenterY);
 
-            // 2. 여러 중복된 박스 중 현재 타겟과 가장 잘 맞는 '베스트 하나'를 선택합니다.
             for (int i = 0; i < currentFrameBoxes.Count; i++)
             {
                 BoundingBox currBox = currentFrameBoxes[i];
                 float iou = TrackingUtils.CalculateIoU(_lockedTargetBox.Value, currBox);
-                
+
                 if (iou < _minIoUThreshold) continue;
 
                 float dist = Vector2.Distance(prevCenter, new Vector2(currBox.CenterX, currBox.CenterY));
@@ -238,10 +238,9 @@ public class IEExecutor : MonoBehaviour
             {
                 _consecutiveLostFrames = 0;
                 UpdateSmoothBox(bestBox);
-                
-                // [해결] 마스크와 시각적 데이터는 오직 베스트 인덱스 하나만 사용합니다.
+
                 _ieMasker.DrawSingleMask(bestIndex, bestBox, _output3MaskWeights, _inputSize.x, _inputSize.y);
-                
+
                 if (_captureRGBD) ExtractRGBDData(bestIndex, bestBox);
             }
             else
@@ -278,7 +277,6 @@ public class IEExecutor : MonoBehaviour
         Vector3 cameraPos = cameraPose.position;
         Quaternion cameraRot = cameraPose.rotation;
 
-        // intrinsics 캐시에서 값 추출
         float fx = _cachedIntrinsics.FocalLength.x;
         float fy = _cachedIntrinsics.FocalLength.y;
         float cx = _cachedIntrinsics.PrincipalPoint.x;
@@ -357,10 +355,10 @@ public class IEExecutor : MonoBehaviour
 
     private void PredictBoxMovement()
     {
-        float deltaTime = Time.deltaTime; 
+        float deltaTime = Time.deltaTime;
         float predX = _lockedTargetBox.Value.CenterX + (_centerVelocity.x * deltaTime);
         float predY = _lockedTargetBox.Value.CenterY + (_centerVelocity.y * deltaTime);
-        _centerVelocity *= 0.9f; 
+        _centerVelocity *= 0.9f;
         _lockedTargetBox = new BoundingBox { CenterX = predX, CenterY = predY, Width = _lockedTargetBox.Value.Width, Height = _lockedTargetBox.Value.Height, ClassName = _lockedTargetBox.Value.ClassName, Label = _lockedTargetBox.Value.Label, WorldPos = _lockedTargetBox.Value.WorldPos };
     }
 
@@ -373,7 +371,7 @@ public class IEExecutor : MonoBehaviour
         float halfScreenW = Screen.width / 2f; float halfScreenH = Screen.height / 2f;
         foreach (var box in _currentFrameBoxes)
         {
-            float boxScreenX = box.CenterX + halfScreenW; float boxScreenY = halfScreenH - box.CenterY; float margin = 30f; 
+            float boxScreenX = box.CenterX + halfScreenW; float boxScreenY = halfScreenH - box.CenterY; float margin = 30f;
             if (screenPos.x >= boxScreenX - box.Width/2f - margin && screenPos.x <= boxScreenX + box.Width/2f + margin && screenPos.y >= boxScreenY - box.Height/2f - margin && screenPos.y <= boxScreenY + box.Height/2f + margin)
             {
                 float dist = Vector2.Distance(screenPos, new Vector2(boxScreenX, boxScreenY));
