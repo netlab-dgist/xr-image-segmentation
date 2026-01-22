@@ -73,7 +73,7 @@ public class IEBoxer : MonoBehaviour
 
             boundingBoxes.Add(box);
 
-            //DrawBox(box, n);
+            DrawBox(box, n);
         }
         ClearBoxes(maxBoxes);
 

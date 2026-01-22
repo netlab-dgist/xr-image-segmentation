@@ -3,29 +3,80 @@ using Unity.InferenceEngine;
 using UnityEngine.UI;
 using System.Collections.Generic;
 
-public class IEMasker
+/// <summary>
+/// [최적화] MonoBehaviour로 변경하여 매 프레임 마스크 위치를 스무딩 업데이트
+/// </summary>
+public class IEMasker : MonoBehaviour
 {
-    [SerializeField] private Transform _displayLocation;
     private const int YOLO11_MASK_HEIGHT = 160;
     private const int YOLO11_MASK_WIDTH = 160;
+
+    [SerializeField] private Transform _displayLocation;
+    [SerializeField] private float _positionSmoothTime = 0.05f;
+    [SerializeField] private float _sizeSmoothTime = 0.1f;
 
     private readonly List<RawImage> _maskImages = new();
     private readonly List<Color> _maskColors = new();
 
     private float _confidenceThreshold = 0.5f;
 
-    // [깜빡임 방지] 픽셀 배열 캐싱 (GC 감소)
+    // [최적화] 픽셀 배열 캐싱 (GC 감소)
     private Color32[] _cachedPixelArray;
 
-    // [깜빡임 방지] 마지막으로 그린 마스크 상태 캐싱
+    // [최적화] 마지막으로 그린 마스크 상태 캐싱
     private int _lastTargetIndex = -1;
     private bool _hasCachedMask = false;
 
-    public IEMasker(Transform displayLocation, float confidenceThreshold)
+    // [최적화] 스무딩을 위한 현재/목표 위치 및 크기
+    private Vector2 _currentPosition;
+    private Vector2 _targetPosition;
+    private Vector2 _currentSize;
+    private Vector2 _targetSize;
+    private Vector2 _positionVelocity;
+    private Vector2 _sizeVelocity;
+    private bool _hasTarget = false;
+
+    // 이미지 크기 캐싱
+    private int _imageWidth;
+    private int _imageHeight;
+
+    /// <summary>
+    /// 외부에서 초기화 (IEExecutor에서 호출)
+    /// </summary>
+    public void Initialize(Transform displayLocation, float confidenceThreshold)
     {
         _displayLocation = displayLocation;
         _confidenceThreshold = confidenceThreshold;
         _cachedPixelArray = new Color32[YOLO11_MASK_HEIGHT * YOLO11_MASK_WIDTH];
+    }
+
+    private void Update()
+    {
+        // 매 프레임 마스크 위치 스무딩 업데이트
+        if (_hasTarget && _maskImages.Count > 0 && _maskImages[0].gameObject.activeSelf)
+        {
+            UpdateMaskTransform();
+        }
+    }
+
+    /// <summary>
+    /// [최적화] 매 프레임 호출 - 마스크 RawImage의 위치와 크기를 스무딩
+    /// </summary>
+    private void UpdateMaskTransform()
+    {
+        // 위치 스무딩
+        _currentPosition = Vector2.SmoothDamp(_currentPosition, _targetPosition, ref _positionVelocity, _positionSmoothTime);
+
+        // 크기 스무딩
+        _currentSize = Vector2.SmoothDamp(_currentSize, _targetSize, ref _sizeVelocity, _sizeSmoothTime);
+
+        // RawImage 업데이트
+        if (_maskImages.Count > 0)
+        {
+            RectTransform rectTransform = _maskImages[0].GetComponent<RectTransform>();
+            rectTransform.localPosition = new Vector3(_currentPosition.x, _currentPosition.y, 0);
+            rectTransform.sizeDelta = _currentSize;
+        }
     }
 
     public void DrawMask(List<BoundingBox> boundBoxes, Tensor<float> mask, int imageWidth, int imageHeight)
@@ -46,13 +97,11 @@ public class IEMasker
             {
                 for (int x = 0; x < YOLO11_MASK_WIDTH; x++)
                 {
-                    // Get the probability value at the current pixel
                     float value = mask[i, y, x];
 
                     int posX = x;
                     int posY = YOLO11_MASK_HEIGHT - y - 1;
 
-                    // If the value is greater than confidenceThreshold and is inside the box, draw the pixel
                     if (value > _confidenceThreshold && PixelInBoundingBox(boundBoxes[i], posX, posY, imageWidth, imageHeight))
                     {
                         pixelArray[posY * YOLO11_MASK_WIDTH + posX] = GetColor(i);
@@ -63,7 +112,6 @@ public class IEMasker
                     }
                 }
             }
-            // DebugDrawBoundingBox(maskTexture, boundBoxes[i], Color.black, (int)imageWidth, (int)imageHeight);
             maskTexture.SetPixels32(pixelArray);
             maskTexture.Apply();
         }
@@ -71,17 +119,16 @@ public class IEMasker
     }
 
     /// <summary>
-    /// 단일 객체의 마스크만 그립니다. 트래킹 모드에서 사용됩니다.
+    /// [최적화] 단일 객체의 마스크를 그리고, 목표 위치/크기 설정
     /// </summary>
-    /// <param name="targetIndex">그릴 객체의 인덱스. -1이면 모든 마스크를 숨깁니다.</param>
     public void DrawSingleMask(int targetIndex, BoundingBox box, Tensor<float> mask, int imageWidth, int imageHeight)
     {
-        // 인덱스가 -1이면 모든 마스크 숨기기
         if (targetIndex < 0 || mask == null)
         {
             ClearMasks(0);
             _hasCachedMask = false;
             _lastTargetIndex = -1;
+            _hasTarget = false;
             return;
         }
 
@@ -91,10 +138,30 @@ public class IEMasker
             return;
         }
 
-        // [깜빡임 방지] 텍스처를 먼저 가져와서 활성화 상태 유지
-        Texture2D maskTexture = GetTexture(0, imageWidth, imageHeight);
+        _imageWidth = imageWidth;
+        _imageHeight = imageHeight;
 
-        // [깜빡임 방지] 캐싱된 배열 사용 (GC 감소)
+        // [최적화] 목표 위치와 크기 설정 (스무딩은 Update에서 처리)
+        Vector2 newTargetPos = new Vector2(box.CenterX, -box.CenterY);
+        Vector2 newTargetSize = new Vector2(box.Width, box.Height);
+
+        // 첫 번째 프레임이거나 타겟이 없었으면 즉시 이동
+        if (!_hasTarget)
+        {
+            _currentPosition = newTargetPos;
+            _currentSize = newTargetSize;
+            _positionVelocity = Vector2.zero;
+            _sizeVelocity = Vector2.zero;
+        }
+
+        _targetPosition = newTargetPos;
+        _targetSize = newTargetSize;
+        _hasTarget = true;
+
+        // 텍스처를 먼저 가져와서 활성화 상태 유지
+        Texture2D maskTexture = GetMaskTexture(0);
+
+        // 캐싱된 배열 사용 (GC 감소)
         Color32 maskColor = GetColor(0);
 
         for (int y = 0; y < YOLO11_MASK_HEIGHT; y++)
@@ -117,7 +184,6 @@ public class IEMasker
             }
         }
 
-        // [깜빡임 방지] 텍스처 업데이트 후 불필요한 마스크 숨기기
         maskTexture.SetPixels32(_cachedPixelArray);
         maskTexture.Apply();
 
@@ -130,24 +196,24 @@ public class IEMasker
     }
 
     /// <summary>
-    /// [깜빡임 방지] Lost frames 동안 마스크 가시성만 유지 (텍스처 업데이트 없음)
+    /// [최적화] Lost frames 동안 마스크 가시성 유지하고 예측 이동
     /// </summary>
     public void KeepCurrentMask()
     {
         if (_hasCachedMask && _maskImages.Count > 0)
         {
             _maskImages[0].gameObject.SetActive(true);
+            // 스무딩은 Update에서 계속 처리됨
         }
     }
 
     /// <summary>
-    /// [깜빡임 방지] 현재 캐시된 마스크가 있는지 확인
+    /// 현재 캐시된 마스크가 있는지 확인
     /// </summary>
     public bool HasCachedMask => _hasCachedMask;
 
     private void ClearMasks(int lastBoxCount)
     {
-        // Disable all mask images that are not needed
         for (int i = lastBoxCount; i < _maskImages.Count; i++)
         {
             _maskImages[i].gameObject.SetActive(false);
@@ -155,59 +221,49 @@ public class IEMasker
     }
 
     /// <summary>
-    /// [깜빡임 방지] 모든 마스크를 숨기는 public 메서드
+    /// 모든 마스크를 숨기는 public 메서드
     /// </summary>
     public void ClearAllMasks()
     {
         ClearMasks(0);
-    }
-
-    private void DebugDrawBoundingBox(Texture2D maskTexture, BoundingBox box, Color color, int imageWidth, int imageHeight)
-    {
-        // Scale factor to reduce the bounding box size
-        float xScaleFactor = YOLO11_MASK_WIDTH / (float)imageWidth;
-        float yScaleFactor = YOLO11_MASK_HEIGHT / (float)imageHeight;
-
-        // Convert bounding box center from middle-origin to top-left origin and apply scaling factor
-        int centerX = Mathf.RoundToInt(box.CenterX * xScaleFactor) + YOLO11_MASK_WIDTH / 2;
-        int centerY = Mathf.RoundToInt(YOLO11_MASK_HEIGHT / 2 - (box.CenterY * yScaleFactor));  // Invert Y coordinate
-
-        // Calculate dimensions of the scaled bounding box
-        int width = Mathf.RoundToInt(box.Width * xScaleFactor);
-        int height = Mathf.RoundToInt(box.Height * yScaleFactor);
-
-        // Draw the bounding box on the mask texture
-        for (int x = centerX - width / 2; x <= centerX + width / 2; x++)
-        {
-            DrawPixel(maskTexture, x, centerY - height / 2, color); // Top edge
-            DrawPixel(maskTexture, x, centerY + height / 2, color); // Bottom edge
-        }
-        for (int y = centerY - height / 2; y <= centerY + height / 2; y++)
-        {
-            DrawPixel(maskTexture, centerX - width / 2, y, color); // Left edge
-            DrawPixel(maskTexture, centerX + width / 2, y, color); // Right edge
-        }
+        _hasTarget = false;
     }
 
     private bool PixelInBoundingBox(BoundingBox box, int x, int y, int imageWidth, int imageHeight)
     {
-        // Scale factor to reduce the bounding box size
         float xScaleFactor = YOLO11_MASK_WIDTH / (float)imageWidth;
         float yScaleFactor = YOLO11_MASK_HEIGHT / (float)imageHeight;
 
-        // Convert bounding box center from middle-origin to top-left origin and apply scaling factor
         float centerX = (box.CenterX * xScaleFactor) + (YOLO11_MASK_WIDTH / 2);
-        float centerY = (YOLO11_MASK_HEIGHT / 2) - (box.CenterY * yScaleFactor); // Invert Y coordinate
+        float centerY = (YOLO11_MASK_HEIGHT / 2) - (box.CenterY * yScaleFactor);
 
-        // Calculate half-dimensions of the scaled bounding box
         float halfWidth = box.Width * xScaleFactor / 2;
         float halfHeight = box.Height * yScaleFactor / 2;
 
-        // Check if pixel is within the bounding box boundaries
         return x >= (centerX - halfWidth) &&
                x <= (centerX + halfWidth) &&
                y >= (centerY - halfHeight) &&
                y <= (centerY + halfHeight);
+    }
+
+    /// <summary>
+    /// [최적화] 마스크용 RawImage와 텍스처 가져오기 (물체 크기에 맞춤)
+    /// </summary>
+    private Texture2D GetMaskTexture(int segmentationId)
+    {
+        RawImage maskImage;
+        if (segmentationId < _maskImages.Count)
+        {
+            maskImage = _maskImages[segmentationId];
+        }
+        else
+        {
+            maskImage = CreateRawImage(segmentationId);
+            _maskImages.Add(maskImage);
+        }
+        maskImage.gameObject.SetActive(true);
+
+        return maskImage.texture as Texture2D;
     }
 
     private Texture2D GetTexture(int segmentationId, int imageWidth, int imageHeight)
@@ -219,7 +275,7 @@ public class IEMasker
         }
         else
         {
-            maskImage = CreateRawImage(segmentationId, imageWidth, imageHeight);
+            maskImage = CreateRawImage(segmentationId);
             _maskImages.Add(maskImage);
         }
         maskImage.gameObject.SetActive(true);
@@ -245,7 +301,7 @@ public class IEMasker
         }
     }
 
-    private RawImage CreateRawImage(int segmentationId, int imageWidth, int imageHeight)
+    private RawImage CreateRawImage(int segmentationId)
     {
         GameObject maskObject = new GameObject("MaskImage " + segmentationId);
         maskObject.transform.SetParent(_displayLocation, false);
@@ -264,13 +320,5 @@ public class IEMasker
             filterMode = FilterMode.Bilinear,
             wrapMode = TextureWrapMode.Clamp
         };
-    }
-
-    private void DrawPixel(Texture2D maskTexture, int x, int y, Color color)
-    {
-        // Ensure coordinates are within bounds
-        if (x < 0 || x >= maskTexture.width || y < 0 || y >= maskTexture.height) return;
-
-        maskTexture.SetPixel(x, y, color);
     }
 }

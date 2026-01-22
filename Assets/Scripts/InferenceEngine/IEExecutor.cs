@@ -11,14 +11,11 @@ public class IEExecutor : MonoBehaviour
     enum InferenceDownloadState
     {
         Running = 0,
-        RequestingOutput0 = 1,
-        RequestingOutput1 = 2,
-        RequestingOutput2 = 3,
-        RequestingOutput3 = 4,
-        Success = 5,
-        Error = 6,
-        Cleanup = 7,
-        Completed = 8
+        RequestingOutputs = 1,
+        Success = 2,
+        Error = 3,
+        Cleanup = 4,
+        Completed = 5
     }
 
     [Header("Model Settings")]
@@ -56,14 +53,16 @@ public class IEExecutor : MonoBehaviour
     public bool IsModelLoaded { get; private set; } = false;
 
     [SerializeField] private IEBoxer _ieBoxer;
-
-    private IEMasker _ieMasker;
+    [SerializeField] private IEMasker _ieMasker;
     private Worker _inferenceEngineWorker;
     private IEnumerator _schedule;
     private InferenceDownloadState _downloadState = InferenceDownloadState.Running;
 
     private Tensor<float> _input;
-    private Tensor _buffer;
+
+    // [최적화] 병렬 Readback을 위한 버퍼 배열
+    private readonly Tensor[] _outputBuffers = new Tensor[4];
+    private readonly bool[] _readbackComplete = new bool[4];
     private Tensor<float> _output0BoxCoords;
     private Tensor<int> _output1LabelIds;
     private Tensor<float> _output2Masks;
@@ -71,7 +70,13 @@ public class IEExecutor : MonoBehaviour
 
     private Texture2D _cpuDepthTex;
     private bool _isDepthReadingBack = false;
+
+    // [최적화] RGB 비동기 읽기를 위한 변수들
     private Color32[] _rgbPixelCache;
+    private RenderTexture _rgbRenderTexture;
+    private Texture2D _rgbCpuTexture;
+    private bool _isRgbReadingBack = false;
+    private bool _rgbDataReady = false;
 
     // [최적화] 카메라 intrinsics 캐싱 (한 번만 로드)
     private PassthroughCameraSamples.PassthroughCameraIntrinsics _cachedIntrinsics;
@@ -86,8 +91,8 @@ public class IEExecutor : MonoBehaviour
     private float _currentSmoothTime;
 
     private bool _started = false;
-    private bool _isWaitingForReadbackRequest = false;
-    private List<BoundingBox> _currentFrameBoxes = new();
+    private bool _readbacksInitiated = false;
+    private readonly List<BoundingBox> _currentFrameBoxes = new();
 
     // IEDepthManager 등 외부에서 접근하는 프로퍼티
     public bool IsTracking => _isTracking;
@@ -101,7 +106,10 @@ public class IEExecutor : MonoBehaviour
     private IEnumerator Start()
     {
         yield return new WaitForSeconds(0.05f);
-        _ieMasker = new IEMasker(_displayLocation, _confidenceThreshold);
+        if (_ieMasker != null)
+        {
+            _ieMasker.Initialize(_displayLocation, _confidenceThreshold);
+        }
         LoadModel();
     }
 
@@ -109,6 +117,7 @@ public class IEExecutor : MonoBehaviour
     {
         UpdateInference();
         PrepareDepthData();
+        PrepareRgbData();
     }
 
     private void OnDestroy()
@@ -117,6 +126,8 @@ public class IEExecutor : MonoBehaviour
         _input?.Dispose();
         _inferenceEngineWorker?.Dispose();
         if (_cpuDepthTex != null) Destroy(_cpuDepthTex);
+        if (_rgbRenderTexture != null) _rgbRenderTexture.Release();
+        if (_rgbCpuTexture != null) Destroy(_rgbCpuTexture);
     }
 
     private void PrepareDepthData()
@@ -138,6 +149,37 @@ public class IEExecutor : MonoBehaviour
         });
     }
 
+    /// <summary>
+    /// [최적화] RGB 텍스처를 비동기로 읽기 (GetPixels32 대체)
+    /// </summary>
+    private void PrepareRgbData()
+    {
+        if (_webCamManager == null || _isRgbReadingBack) return;
+        WebCamTexture rgbTex = _webCamManager.WebCamTexture;
+        if (rgbTex == null || rgbTex.width < 100) return;
+
+        // RenderTexture 초기화 (필요시)
+        if (_rgbRenderTexture == null || _rgbRenderTexture.width != rgbTex.width)
+        {
+            if (_rgbRenderTexture != null) _rgbRenderTexture.Release();
+            _rgbRenderTexture = new RenderTexture(rgbTex.width, rgbTex.height, 0, RenderTextureFormat.ARGB32);
+            _rgbCpuTexture = new Texture2D(rgbTex.width, rgbTex.height, TextureFormat.RGBA32, false);
+            _rgbPixelCache = new Color32[rgbTex.width * rgbTex.height];
+        }
+
+        // GPU에서 복사 (빠름)
+        Graphics.Blit(rgbTex, _rgbRenderTexture);
+
+        _isRgbReadingBack = true;
+        AsyncGPUReadback.Request(_rgbRenderTexture, 0, TextureFormat.RGBA32, request => {
+            if (request.hasError) { _isRgbReadingBack = false; return; }
+            var data = request.GetData<Color32>();
+            data.CopyTo(_rgbPixelCache);
+            _rgbDataReady = true;
+            _isRgbReadingBack = false;
+        });
+    }
+
     public void RunInference(Texture inputTexture)
     {
         if (!_started)
@@ -149,6 +191,7 @@ public class IEExecutor : MonoBehaviour
             _schedule = _inferenceEngineWorker.ScheduleIterable(_input);
             _downloadState = InferenceDownloadState.Running;
             _started = true;
+            _readbacksInitiated = false;
         }
     }
 
@@ -166,53 +209,111 @@ public class IEExecutor : MonoBehaviour
     private void UpdateInference()
     {
         if (!_started) return;
-        if (_downloadState == InferenceDownloadState.Running)
-        {
-            int it = 0;
-            while (_schedule.MoveNext()) if (++it % _layersPerFrame == 0) return;
-            _downloadState = InferenceDownloadState.RequestingOutput0;
-        }
-        else UpdateProcessInferenceResults();
-    }
 
-    private void UpdateProcessInferenceResults()
-    {
         switch (_downloadState)
         {
-            case InferenceDownloadState.RequestingOutput0: HandleReadback(0, ref _output0BoxCoords, ref _downloadState, InferenceDownloadState.RequestingOutput1); break;
-            case InferenceDownloadState.RequestingOutput1: HandleReadback(1, ref _output1LabelIds, ref _downloadState, InferenceDownloadState.RequestingOutput2); break;
-            case InferenceDownloadState.RequestingOutput2: HandleReadback(2, ref _output2Masks, ref _downloadState, InferenceDownloadState.RequestingOutput3); break;
-            case InferenceDownloadState.RequestingOutput3: HandleReadback(3, ref _output3MaskWeights, ref _downloadState, InferenceDownloadState.Success); break;
-            case InferenceDownloadState.Success: ProcessSuccessState(); _downloadState = InferenceDownloadState.Cleanup; break;
-            case InferenceDownloadState.Error: _downloadState = InferenceDownloadState.Cleanup; break;
-            case InferenceDownloadState.Cleanup: CleanupResources(); _downloadState = InferenceDownloadState.Completed; _started = false; break;
+            case InferenceDownloadState.Running:
+                int it = 0;
+                while (_schedule.MoveNext()) if (++it % _layersPerFrame == 0) return;
+                _downloadState = InferenceDownloadState.RequestingOutputs;
+                break;
+
+            case InferenceDownloadState.RequestingOutputs:
+                UpdateParallelReadbacks();
+                break;
+
+            case InferenceDownloadState.Success:
+                ProcessSuccessState();
+                _downloadState = InferenceDownloadState.Cleanup;
+                break;
+
+            case InferenceDownloadState.Error:
+                _downloadState = InferenceDownloadState.Cleanup;
+                break;
+
+            case InferenceDownloadState.Cleanup:
+                CleanupResources();
+                _downloadState = InferenceDownloadState.Completed;
+                _started = false;
+                break;
         }
     }
 
-    private void HandleReadback<T>(int outputIndex, ref Tensor<T> targetTensor, ref InferenceDownloadState currentState, InferenceDownloadState nextState) where T : unmanaged
+    /// <summary>
+    /// [최적화] 4개의 출력을 병렬로 Readback 요청
+    /// </summary>
+    private void UpdateParallelReadbacks()
     {
-        if (!_isWaitingForReadbackRequest) { _buffer = GetOutputBuffer(outputIndex); InitiateReadbackRequest(_buffer); }
-        else if (_buffer.IsReadbackRequestDone())
+        // 첫 번째 호출: 모든 readback 요청을 동시에 시작
+        if (!_readbacksInitiated)
         {
-            targetTensor = _buffer.ReadbackAndClone() as Tensor<T>;
-            _isWaitingForReadbackRequest = false;
-            currentState = targetTensor.shape[0] > 0 ? nextState : InferenceDownloadState.Error;
-            _buffer?.Dispose();
+            for (int i = 0; i < 4; i++)
+            {
+                _readbackComplete[i] = false;
+                _outputBuffers[i] = _inferenceEngineWorker.PeekOutput(i);
+
+                if (_outputBuffers[i].dataOnBackend != null)
+                {
+                    _outputBuffers[i].ReadbackRequest();
+                }
+                else
+                {
+                    _downloadState = InferenceDownloadState.Error;
+                    return;
+                }
+            }
+            _readbacksInitiated = true;
+            return;
+        }
+
+        // 이후 호출: 모든 readback이 완료되었는지 확인
+        bool allComplete = true;
+        for (int i = 0; i < 4; i++)
+        {
+            if (!_readbackComplete[i])
+            {
+                if (_outputBuffers[i].IsReadbackRequestDone())
+                {
+                    _readbackComplete[i] = true;
+                }
+                else
+                {
+                    allComplete = false;
+                }
+            }
+        }
+
+        // 모든 readback이 완료되면 텐서 복제
+        if (allComplete)
+        {
+            _output0BoxCoords = _outputBuffers[0].ReadbackAndClone() as Tensor<float>;
+            _output1LabelIds = _outputBuffers[1].ReadbackAndClone() as Tensor<int>;
+            _output2Masks = _outputBuffers[2].ReadbackAndClone() as Tensor<float>;
+            _output3MaskWeights = _outputBuffers[3].ReadbackAndClone() as Tensor<float>;
+
+            // 버퍼 정리
+            for (int i = 0; i < 4; i++)
+            {
+                _outputBuffers[i]?.Dispose();
+                _outputBuffers[i] = null;
+            }
+
+            _downloadState = (_output0BoxCoords != null && _output0BoxCoords.shape[0] > 0)
+                ? InferenceDownloadState.Success
+                : InferenceDownloadState.Error;
         }
     }
 
     private void ProcessSuccessState()
     {
-        // [깜빡임 방지] 추적 중일 때는 DrawBoxes를 호출하지 않고 박스 데이터만 파싱
         List<BoundingBox> currentFrameBoxes;
 
         if (_isTracking && _lockedTargetBox.HasValue)
         {
-            // 추적 모드: 박스 시각화 없이 데이터만 파싱
             currentFrameBoxes = ParseBoxesWithoutDraw(_output0BoxCoords, _output1LabelIds, _inputSize.x, _inputSize.y);
-            _currentFrameBoxes = currentFrameBoxes;
+            _currentFrameBoxes.Clear();
+            _currentFrameBoxes.AddRange(currentFrameBoxes);
 
-            // 추적 중에는 모든 박스 숨김 (이미 숨겨진 상태 유지)
             _ieBoxer.HideAllBoxes();
 
             float bestScore = 0f;
@@ -243,8 +344,6 @@ public class IEExecutor : MonoBehaviour
             {
                 _consecutiveLostFrames = 0;
                 UpdateSmoothBox(bestBox);
-
-                // [깜빡임 방지] 마스크 업데이트 (IEMasker 내부에서 처리)
                 _ieMasker.DrawSingleMask(bestIndex, bestBox, _output3MaskWeights, _inputSize.x, _inputSize.y);
 
                 if (_captureRGBD) ExtractRGBDData(bestIndex, bestBox);
@@ -255,7 +354,6 @@ public class IEExecutor : MonoBehaviour
                 if (_consecutiveLostFrames <= _maxLostFrames)
                 {
                     PredictBoxMovement();
-                    // [깜빡임 방지] Lost frame 동안 이전 마스크 명시적으로 유지
                     _ieMasker.KeepCurrentMask();
                 }
                 else
@@ -266,17 +364,14 @@ public class IEExecutor : MonoBehaviour
         }
         else
         {
-            // 비추적 모드: 기존처럼 박스 시각화
             currentFrameBoxes = _ieBoxer.DrawBoxes(_output0BoxCoords, _output1LabelIds, _inputSize.x, _inputSize.y);
-            _currentFrameBoxes = currentFrameBoxes;
+            _currentFrameBoxes.Clear();
+            _currentFrameBoxes.AddRange(currentFrameBoxes);
             _ieMasker.ClearAllMasks();
             CurrentPointCount = 0;
         }
     }
 
-    /// <summary>
-    /// [깜빡임 방지] 박스 시각화 없이 데이터만 파싱하는 헬퍼 함수
-    /// </summary>
     private List<BoundingBox> ParseBoxesWithoutDraw(Tensor<float> output, Tensor<int> labelIds, float imageWidth, float imageHeight)
     {
         List<BoundingBox> boundingBoxes = new();
@@ -311,11 +406,14 @@ public class IEExecutor : MonoBehaviour
         return boundingBoxes;
     }
 
+    /// <summary>
+    /// [최적화] 비동기로 읽은 RGB 데이터 사용
+    /// </summary>
     private void ExtractRGBDData(int targetIndex, BoundingBox box)
     {
-        if (_webCamManager == null || _cpuDepthTex == null) return;
-        WebCamTexture rgbTex = _webCamManager.WebCamTexture;
-        if (rgbTex == null || rgbTex.width < 100) return;
+        // 비동기 RGB 데이터가 준비되지 않았으면 스킵
+        if (!_rgbDataReady || _cpuDepthTex == null) return;
+        if (_rgbPixelCache == null || _rgbPixelCache.Length == 0) return;
 
         // [최적화] 카메라 intrinsics 캐싱 (한 번만 로드)
         if (!_intrinsicsCached)
@@ -325,7 +423,6 @@ public class IEExecutor : MonoBehaviour
             _intrinsicsCached = true;
         }
 
-        // [최적화] 카메라 pose는 프레임당 한 번만 가져오기
         Pose cameraPose = PassthroughCameraSamples.PassthroughCameraUtils.GetCameraPoseInWorld(
             PassthroughCameraSamples.PassthroughCameraEye.Left);
         Vector3 cameraPos = cameraPose.position;
@@ -336,14 +433,11 @@ public class IEExecutor : MonoBehaviour
         float cx = _cachedIntrinsics.PrincipalPoint.x;
         float cy = _cachedIntrinsics.PrincipalPoint.y;
 
-        if (_rgbPixelCache == null || _rgbPixelCache.Length != rgbTex.width * rgbTex.height)
-            _rgbPixelCache = new Color32[rgbTex.width * rgbTex.height];
-
-        rgbTex.GetPixels32(_rgbPixelCache);
-
         var depthData = _cpuDepthTex.GetRawTextureData<ushort>();
-        int rgbW = rgbTex.width; int rgbH = rgbTex.height;
-        int depthW = _cpuDepthTex.width; int depthH = _cpuDepthTex.height;
+        int rgbW = _rgbRenderTexture.width;
+        int rgbH = _rgbRenderTexture.height;
+        int depthW = _cpuDepthTex.width;
+        int depthH = _cpuDepthTex.height;
 
         CurrentPointCount = 0;
         for (int y = 0; y < 160; y += _samplingStep)
@@ -366,7 +460,6 @@ public class IEExecutor : MonoBehaviour
 
                     if (depthMeters > 0.1f && depthMeters < 3.0f)
                     {
-                        // [최적화] 레이 방향 인라인 계산 (함수 호출 제거)
                         Vector3 dirInCamera = new Vector3(
                             (rgbPixel.x - cx) / fx,
                             (rgbPixel.y - cy) / fy,
@@ -416,26 +509,62 @@ public class IEExecutor : MonoBehaviour
         _lockedTargetBox = new BoundingBox { CenterX = predX, CenterY = predY, Width = _lockedTargetBox.Value.Width, Height = _lockedTargetBox.Value.Height, ClassName = _lockedTargetBox.Value.ClassName, Label = _lockedTargetBox.Value.Label, WorldPos = _lockedTargetBox.Value.WorldPos };
     }
 
-    private void CleanupResources() { _output0BoxCoords?.Dispose(); _output1LabelIds?.Dispose(); _output2Masks?.Dispose(); _output3MaskWeights?.Dispose(); }
+    private void CleanupResources()
+    {
+        _output0BoxCoords?.Dispose();
+        _output1LabelIds?.Dispose();
+        _output2Masks?.Dispose();
+        _output3MaskWeights?.Dispose();
+        _readbacksInitiated = false;
+    }
 
     public void SelectTargetFromScreenPos(Vector2 screenPos)
     {
         if (_currentFrameBoxes == null || _currentFrameBoxes.Count == 0) return;
-        float minDistance = float.MaxValue; BoundingBox? bestBox = null;
-        float halfScreenW = Screen.width / 2f; float halfScreenH = Screen.height / 2f;
+        float minDistance = float.MaxValue;
+        BoundingBox? bestBox = null;
+        float halfScreenW = Screen.width / 2f;
+        float halfScreenH = Screen.height / 2f;
+
         foreach (var box in _currentFrameBoxes)
         {
-            float boxScreenX = box.CenterX + halfScreenW; float boxScreenY = halfScreenH - box.CenterY; float margin = 30f;
-            if (screenPos.x >= boxScreenX - box.Width/2f - margin && screenPos.x <= boxScreenX + box.Width/2f + margin && screenPos.y >= boxScreenY - box.Height/2f - margin && screenPos.y <= boxScreenY + box.Height/2f + margin)
+            float boxScreenX = box.CenterX + halfScreenW;
+            float boxScreenY = halfScreenH - box.CenterY;
+            float margin = 30f;
+
+            if (screenPos.x >= boxScreenX - box.Width/2f - margin &&
+                screenPos.x <= boxScreenX + box.Width/2f + margin &&
+                screenPos.y >= boxScreenY - box.Height/2f - margin &&
+                screenPos.y <= boxScreenY + box.Height/2f + margin)
             {
                 float dist = Vector2.Distance(screenPos, new Vector2(boxScreenX, boxScreenY));
-                if (dist < minDistance) { minDistance = dist; bestBox = box; }
+                if (dist < minDistance)
+                {
+                    minDistance = dist;
+                    bestBox = box;
+                }
             }
         }
-        if (bestBox.HasValue) { _lockedTargetBox = bestBox.Value; _isTracking = true; _consecutiveLostFrames = 0; _centerVelocity = Vector2.zero; _sizeVelocity = Vector2.zero; _currentSmoothTime = _maxSmoothTime; Debug.Log($"[IEExecutor] Target Selected: {bestBox.Value.ClassName}"); }
+
+        if (bestBox.HasValue)
+        {
+            _lockedTargetBox = bestBox.Value;
+            _isTracking = true;
+            _consecutiveLostFrames = 0;
+            _centerVelocity = Vector2.zero;
+            _sizeVelocity = Vector2.zero;
+            _currentSmoothTime = _maxSmoothTime;
+            Debug.Log($"[IEExecutor] Target Selected: {bestBox.Value.ClassName}");
+        }
     }
 
-    public void ResetTracking() { _isTracking = false; _lockedTargetBox = null; _consecutiveLostFrames = 0; if (_ieMasker != null) _ieMasker.ClearAllMasks(); CurrentPointCount = 0; Debug.Log("[IEExecutor] Tracking Reset"); }
-    private Tensor GetOutputBuffer(int outputIndex) => _inferenceEngineWorker.PeekOutput(outputIndex);
-    private void InitiateReadbackRequest(Tensor pullTensor) { if (pullTensor.dataOnBackend != null) { pullTensor.ReadbackRequest(); _isWaitingForReadbackRequest = true; } else _downloadState = InferenceDownloadState.Error; }
+    public void ResetTracking()
+    {
+        _isTracking = false;
+        _lockedTargetBox = null;
+        _consecutiveLostFrames = 0;
+        if (_ieMasker != null) _ieMasker.ClearAllMasks();
+        CurrentPointCount = 0;
+        Debug.Log("[IEExecutor] Tracking Reset");
+    }
 }
