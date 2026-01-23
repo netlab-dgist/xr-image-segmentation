@@ -22,17 +22,34 @@ public class PointCloudRenderer : MonoBehaviour
         _meshFilter = gameObject.AddComponent<MeshFilter>();
         _meshRenderer = gameObject.AddComponent<MeshRenderer>();
         
-        // 머티리얼 설정 (Unlit 또는 Particles/Standard Unlit 권장)
         if (_pointCloudMaterial == null)
         {
-            var shader = Shader.Find("Particles/Standard Unlit");
+            // 1. 커스텀 셰이더 시도
+            var shader = Shader.Find("Custom/PointcloudShader");
+            
+            // 2. 실패 시 기본 Unlit 시도
             if (shader == null) shader = Shader.Find("Unlit/Color");
-            _pointCloudMaterial = new Material(shader);
+            
+            // 3. 그래도 없으면 스탠다드 (최후의 수단)
+            if (shader == null) shader = Shader.Find("Standard");
+
+            if (shader != null)
+            {
+                _pointCloudMaterial = new Material(shader);
+            }
+            else
+            {
+                Debug.LogError("[PointCloudRenderer] Failed to find any shader for Point Cloud!");
+            }
         }
-        _meshRenderer.material = _pointCloudMaterial;
+
+        if (_pointCloudMaterial != null)
+        {
+            _meshRenderer.material = _pointCloudMaterial;
+        }
 
         _mesh = new Mesh();
-        _mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32; // 65k 이상 포인트 지원
+        _mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
         _meshFilter.mesh = _mesh;
     }
 

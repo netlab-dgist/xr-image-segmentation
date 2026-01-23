@@ -16,10 +16,6 @@ public class IEPassthroughTrigger : MonoBehaviour
     [SerializeField] private LineRenderer _laserLineRenderer;
     [SerializeField] private float _laserLength = 50.0f;
 
-    // [신규] Point Cloud 생성용 스냅샷 버튼 (예: Hand Trigger)
-    [Tooltip("Point Cloud를 생성할 트리거 버튼 (기본: Hand Trigger / Grip)")]
-    [SerializeField] private OVRInput.Button _snapshotButton = OVRInput.Button.SecondaryHandTrigger;
-
     private IEnumerator Start()
     {
         if (_laserLineRenderer == null)
@@ -55,24 +51,27 @@ public class IEPassthroughTrigger : MonoBehaviour
             _laserLineRenderer.SetPosition(0, rightHand.position);
             _laserLineRenderer.SetPosition(1, rightHand.position + rightHand.forward * 3.0f);
 
-            // 1. Index Trigger: 물체 선택 (2D Tracking 시작)
+            // 1. Index Trigger (검지) 통합 로직
             if (OVRInput.GetDown(OVRInput.Button.SecondaryIndexTrigger) ||
                 OVRInput.GetDown(OVRInput.Button.PrimaryIndexTrigger, OVRInput.Controller.RTouch))
             {
-                Debug.Log("Index Trigger -> Selecting Target...");
-                Vector3 targetWorldPoint = rightHand.position + rightHand.forward * _laserLength;
-                Vector3 screenPoint = Camera.main.WorldToScreenPoint(targetWorldPoint);
-                _ieExecutor.SelectTargetFromScreenPos(screenPoint);
+                // 이미 Tracking 중이라면 -> Snapshot 찍기
+                if (_ieExecutor.IsTracking)
+                {
+                    Debug.Log("Index Trigger (Again) -> Capturing Snapshot & Generating Mesh...");
+                    _ieExecutor.CaptureSnapshot();
+                }
+                // Tracking 중이 아니라면 -> 물체 선택 시작
+                else
+                {
+                    Debug.Log("Index Trigger -> Selecting Target...");
+                    Vector3 targetWorldPoint = rightHand.position + rightHand.forward * _laserLength;
+                    Vector3 screenPoint = Camera.main.WorldToScreenPoint(targetWorldPoint);
+                    _ieExecutor.SelectTargetFromScreenPos(screenPoint);
+                }
             }
 
-            // 2. Hand Trigger (Grip): 3D Mesh Snapshot 생성
-            if (OVRInput.GetDown(_snapshotButton))
-            {
-                Debug.Log("Hand Trigger -> Capturing Snapshot & Generating Mesh...");
-                _ieExecutor.CaptureSnapshot();
-            }
-
-            // 3. B Button: 리셋
+            // 2. B Button: 리셋 (동일하게 유지)
             if (OVRInput.GetDown(OVRInput.Button.Two))
             {
                 Debug.Log("B Button -> Reset Tracking");

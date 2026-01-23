@@ -664,7 +664,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!114 &494786730
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1386,7 +1386,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: fbe5c7d2be80e8b439c6cd22bc9a20ec, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  _pointCloudMaterial: {fileID: 0}
+  _pointCloudMaterial: {fileID: 2100000, guid: 6db31c053cbebad49868bcea1f8ad457, type: 2}
   _pointSize: 0.01
 --- !u!1 &832575517
 GameObject:
@@ -1679,7 +1679,6 @@ MonoBehaviour:
   _cameraRig: {fileID: 700560615}
   _laserLineRenderer: {fileID: 0}
   _laserLength: 3
-  _snapshotButton: 4194304
 --- !u!1 &1230766267
 GameObject:
   m_ObjectHideFlags: 0
