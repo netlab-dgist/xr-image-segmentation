@@ -664,7 +664,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &494786730
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1322,6 +1322,7 @@ GameObject:
   m_Component:
   - component: {fileID: 787607879}
   - component: {fileID: 787607880}
+  - component: {fileID: 787607881}
   m_Layer: 0
   m_Name: IEExecutor
   m_TagString: Untagged
@@ -1359,7 +1360,7 @@ MonoBehaviour:
   _inputSize: {x: 640, y: 640}
   _backend: 512
   _sentisModel: {fileID: 5022602860645237092, guid: f1c063a466db58649b6fc7b9aa20b30b, type: 3}
-  _layersPerFrame: 25
+  _layersPerFrame: 30
   _confidenceThreshold: 0.5
   _displayLocation: {fileID: 270828331}
   _maxLostFrames: 10
@@ -1367,7 +1368,26 @@ MonoBehaviour:
   _minSmoothTime: 0.03
   _maxSmoothTime: 0.2
   _sizeSmoothTime: 0.3
+  _depthManager: {fileID: 700560618}
+  _webCamManager: {fileID: 1675638408}
+  _maxPoints: 8000
+  _pointCloudRenderer: {fileID: 787607881}
+  _samplingStep: 4
   _ieBoxer: {fileID: 568621722}
+--- !u!114 &787607881
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 787607877}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fbe5c7d2be80e8b439c6cd22bc9a20ec, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _pointCloudMaterial: {fileID: 0}
+  _pointSize: 0.01
 --- !u!1 &832575517
 GameObject:
   m_ObjectHideFlags: 0
@@ -1659,7 +1679,7 @@ MonoBehaviour:
   _cameraRig: {fileID: 700560615}
   _laserLineRenderer: {fileID: 0}
   _laserLength: 3
-  _rgbdDebugViewer: {fileID: 1998937515}
+  _snapshotButton: 4194304
 --- !u!1 &1230766267
 GameObject:
   m_ObjectHideFlags: 0
