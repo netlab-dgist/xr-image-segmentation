@@ -1223,7 +1223,7 @@ MonoBehaviour:
   _layersPerFrame: 25
   _confidenceThreshold: 0.5
   _displayLocation: {fileID: 270828331}
-  ShowDebugBox: 1
+  EnableUIRendering: 0
   _depthManager: {fileID: 1301121621}
   _maxPoints: 8000
   _depthGradient:
@@ -1256,7 +1256,7 @@ MonoBehaviour:
     m_ColorSpace: -1
     m_NumColorKeys: 2
     m_NumAlphaKeys: 2
-  _samplingStep: 3
+  _samplingStep: 5
   _ieBoxer: {fileID: 568621722}
   _ieMasker: {fileID: 787607881}
 --- !u!114 &787607881
@@ -1562,6 +1562,11 @@ MonoBehaviour:
   _webCamTextureManager: {fileID: 1675638408}
   _outputImage: {fileID: 270828332}
   _ieExecutor: {fileID: 787607880}
+  _rightController: {fileID: 15282537}
+  _laserLine: {fileID: 0}
+  _laserMaterial: {fileID: 2100000, guid: 55649a7984434e14e9a22494560ebdd8, type: 2}
+  _laserLength: 10
+  _laserColor: {r: 0, g: 1, b: 1, a: 1}
 --- !u!1 &1230766267
 GameObject:
   m_ObjectHideFlags: 0
@@ -1654,7 +1659,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   _occlusionShadersMode: 2
-  _removeHands: 1
+  _removeHands: 0
   CustomTrackingSpace: {fileID: 0}
   <MaskMeshFilters>k__BackingField: []
   _cameraRig: {fileID: 700560615}

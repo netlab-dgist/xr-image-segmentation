@@ -7,6 +7,10 @@ using UnityEngine.UI;
 using UnityEngine.Rendering;
 using Meta.XR.EnvironmentDepth;
 using PassthroughCameraSamples;
+using Unity.Burst;
+using Unity.Collections;
+using Unity.Jobs;
+using Unity.Mathematics;
 
 public class IEExecutor : MonoBehaviour
 {
@@ -35,17 +39,147 @@ public class IEExecutor : MonoBehaviour
     [Header("Depth Settings")]
     [SerializeField] private EnvironmentDepthManager _depthManager;
     [SerializeField] private int _maxPoints = 8000;
-    [SerializeField] private Gradient _depthGradient; 
+    [SerializeField] private Gradient _depthGradient;
     [Range(2, 8)]
     [SerializeField] private int _samplingStep = 4;
 
-    public struct RGBDPoint {
+    public struct RGBDPoint
+    {
         public Vector3 worldPos;
         public Color32 color;
     }
 
+    // Burst Job용 데이터 구조체
+    [BurstCompile]
+    private struct DepthExtractionJob : IJobParallelFor
+    {
+        [ReadOnly] public NativeArray<ushort> depthData;
+        [ReadOnly] public NativeArray<float> maskData;
+
+        public int depthW;
+        public int depthH;
+        public int maskW;
+        public int maskH;
+        public int samplingStep;
+        public float confidenceThreshold;
+
+        // Bounding Box 정보
+        public float rawBoxCenterX;
+        public float rawBoxCenterY;
+        public float rawBoxWidth;
+        public float rawBoxHeight;
+
+        // 카메라 정보 (Depth 촬영 시점 기준)
+        public float3 depthCameraPose;
+        public quaternion depthCameraRot;
+        public float2 focalLength;
+        public float2 principalPoint;
+        public float2 sensorRes;
+
+        // 출력
+        [NativeDisableParallelForRestriction]
+        public NativeArray<float3> outPositions;
+        [NativeDisableParallelForRestriction]
+        public NativeArray<float> outDepths;
+        public NativeArray<int> outValid;
+
+        public void Execute(int index)
+        {
+            int totalX = maskW / samplingStep;
+            int localY = index / totalX;
+            int localX = index % totalX;
+
+            int y = localY * samplingStep;
+            int x = localX * samplingStep;
+
+            if (y >= maskH || x >= maskW)
+            {
+                outValid[index] = 0;
+                return;
+            }
+
+            int maskIndex = y * maskW + x;
+            if (maskIndex >= maskData.Length || maskData[maskIndex] <= confidenceThreshold)
+            {
+                outValid[index] = 0;
+                return;
+            }
+
+            // 마스크 좌표 → 이미지 좌표
+            float normX = (float)x / maskW;
+            float normY = (float)y / maskH;
+
+            float imgPixelX = rawBoxCenterX - (rawBoxWidth * 0.5f) + (normX * rawBoxWidth);
+            float imgPixelY = rawBoxCenterY - (rawBoxHeight * 0.5f) + (normY * rawBoxHeight);
+
+            float u = math.clamp(imgPixelX / 640f, 0f, 1f);
+            float v = math.clamp(imgPixelY / 640f, 0f, 1f);
+
+            // Depth 샘플링
+            int dx = (int)(u * (depthW - 1));
+            int dy = (int)((1.0f - v) * (depthH - 1));
+
+            int depthIndex = dy * depthW + dx;
+            if (depthIndex < 0 || depthIndex >= depthData.Length)
+            {
+                outValid[index] = 0;
+                return;
+            }
+
+            float depthMeters = HalfToFloat(depthData[depthIndex]);
+
+            // 유효 거리 필터링 (0.1m ~ 3.0m)
+            if (depthMeters <= 0.1f || depthMeters >= 3.0f)
+            {
+                outValid[index] = 0;
+                return;
+            }
+
+            // 카메라 좌표계에서 방향 계산 (Intrinsics 사용)
+            float camPixelX = u * sensorRes.x;
+            float camPixelY = (1.0f - v) * sensorRes.y;
+
+            float3 dirInCamera = new float3(
+                (camPixelX - principalPoint.x) / focalLength.x,
+                (camPixelY - principalPoint.y) / focalLength.y,
+                1.0f
+            );
+            dirInCamera = math.normalize(dirInCamera);
+
+            // Depth 촬영 시점의 카메라 포즈로 월드 좌표 계산
+            float3 dirInWorld = math.mul(depthCameraRot, dirInCamera);
+            float3 worldPos = depthCameraPose + dirInWorld * depthMeters;
+
+            outPositions[index] = worldPos;
+            outDepths[index] = depthMeters;
+            outValid[index] = 1;
+        }
+
+        // Half-precision float 변환 (Burst 호환)
+        private static float HalfToFloat(ushort half)
+        {
+            int sign = (half >> 15) & 0x1;
+            int exp = (half >> 10) & 0x1F;
+            int mantissa = half & 0x3FF;
+
+            if (exp == 0)
+            {
+                if (mantissa == 0) return sign == 0 ? 0f : -0f;
+                float m = mantissa / 1024f;
+                return (sign == 0 ? 1f : -1f) * m * math.pow(2f, -14f);
+            }
+            else if (exp == 31)
+            {
+                return mantissa == 0 ? (sign == 0 ? float.PositiveInfinity : float.NegativeInfinity) : float.NaN;
+            }
+
+            float fraction = 1f + mantissa / 1024f;
+            return (sign == 0 ? 1f : -1f) * fraction * math.pow(2f, exp - 15);
+        }
+    }
+
     // 이중 버퍼 (데이터 끊김 방지)
-    public RGBDPoint[] PointBuffer; 
+    public RGBDPoint[] PointBuffer;
     public int CurrentPointCount { get; private set; } = 0;
     private RGBDPoint[] _backupBuffer;
     private int _backupCount = 0;
@@ -72,6 +206,25 @@ public class IEExecutor : MonoBehaviour
     private PassthroughCameraIntrinsics _cachedIntrinsics;
     private bool _intrinsicsCached = false;
 
+    // Job System용 NativeArray
+    private NativeArray<float3> _jobPositions;
+    private NativeArray<float> _jobDepths;
+    private NativeArray<int> _jobValid;
+    private NativeArray<ushort> _jobDepthData;
+    private NativeArray<float> _jobMaskData;
+    private JobHandle _currentJobHandle;
+    private bool _jobInProgress = false;
+
+    // Depth 촬영 시점의 카메라 포즈 (시간차 보정용)
+    private Vector3 _depthCameraPose;
+    private Quaternion _depthCameraRot;
+    private bool _hasValidDepthPose = false;
+
+    private const float DEPTH_LATENCY_SECONDS = 0.033f; // ~33ms (약 1-2프레임)
+    private Vector3 _prevCameraPos;
+    private Quaternion _prevCameraRot;
+    private bool _hasPrevPose = false;
+
     private bool _isTracking = false;
     private BoundingBox? _lockedTargetBox = null;
     private List<BoundingBox> _currentFrameBoxes = new List<BoundingBox>();
@@ -80,8 +233,9 @@ public class IEExecutor : MonoBehaviour
     private Texture2D _transparentBackground;
 
     public bool IsModelLoaded { get; private set; } = false;
-    public bool IsTracking => _isTracking; 
-    public BoundingBox? LockedTargetBox => _lockedTargetBox; 
+    public bool IsTracking => _isTracking;
+    public BoundingBox? LockedTargetBox => _lockedTargetBox;
+    public List<BoundingBox> CurrentFrameBoxes => _currentFrameBoxes;
 
     private void Awake()
     {
@@ -101,12 +255,19 @@ public class IEExecutor : MonoBehaviour
     private IEnumerator Start()
     {
         yield return new WaitForSeconds(0.1f);
-        
+
         // UI 셋업 (캔버스가 켜져 있어도 투명하게 처리)
         SetupDisplay();
 
         if (_ieMasker != null) _ieMasker.Initialize(_displayLocation, _confidenceThreshold);
         LoadModel();
+
+        // [안전장치] Depth Manager 모드 확인
+        if (_depthManager != null && _depthManager.OcclusionShadersMode != OcclusionShadersMode.SoftOcclusion)
+        {
+            Debug.LogWarning("[IEExecutor] Switching EnvironmentDepthManager to SoftOcclusion for Point Cloud generation.");
+            _depthManager.OcclusionShadersMode = OcclusionShadersMode.SoftOcclusion;
+        }
     }
 
     private void SetupDisplay()
@@ -124,8 +285,8 @@ public class IEExecutor : MonoBehaviour
             _transparentBackground.Apply();
 
             rawImage.texture = _transparentBackground;
-            rawImage.color = Color.white; 
-            rawImage.enabled = true; 
+            rawImage.color = Color.white;
+            rawImage.enabled = true;
         }
     }
 
@@ -142,6 +303,14 @@ public class IEExecutor : MonoBehaviour
         _inferenceEngineWorker?.Dispose();
         if (_cpuDepthTex != null) Destroy(_cpuDepthTex);
         if (_transparentBackground != null) Destroy(_transparentBackground);
+
+        // Job 완료 대기 및 NativeArray 정리
+        if (_jobInProgress)
+        {
+            _currentJobHandle.Complete();
+        }
+        DisposeJobArrays();
+
         CleanupResources();
     }
 
@@ -153,9 +322,31 @@ public class IEExecutor : MonoBehaviour
 
         if (_cpuDepthTex == null || _cpuDepthTex.width != depthRT.width || _cpuDepthTex.height != depthRT.height)
         {
-            if(_cpuDepthTex != null) Destroy(_cpuDepthTex);
+            if (_cpuDepthTex != null) Destroy(_cpuDepthTex);
             _cpuDepthTex = new Texture2D(depthRT.width, depthRT.height, TextureFormat.RHalf, false, true);
         }
+
+        // 현재 카메라 포즈 가져오기
+        Pose currentCameraPose = PassthroughCameraUtils.GetCameraPoseInWorld(PassthroughCameraEye.Left);
+
+        // 시간차 보정
+        if (_hasPrevPose)
+        {
+            float lerpFactor = Mathf.Clamp01(DEPTH_LATENCY_SECONDS / Time.deltaTime);
+            _depthCameraPose = Vector3.Lerp(currentCameraPose.position, _prevCameraPos, lerpFactor);
+            _depthCameraRot = Quaternion.Slerp(currentCameraPose.rotation, _prevCameraRot, lerpFactor);
+            _hasValidDepthPose = true;
+        }
+        else
+        {
+            _depthCameraPose = currentCameraPose.position;
+            _depthCameraRot = currentCameraPose.rotation;
+            _hasValidDepthPose = true;
+        }
+
+        _prevCameraPos = currentCameraPose.position;
+        _prevCameraRot = currentCameraPose.rotation;
+        _hasPrevPose = true;
 
         _isDepthReadingBack = true;
         AsyncGPUReadback.Request(depthRT, 0, request => {
@@ -276,30 +467,17 @@ public class IEExecutor : MonoBehaviour
             _currentFrameBoxes = ParseBoxes(_output0BoxCoords, _output1LabelIds, screenW, screenH);
         }
 
-        // [Case 1] 트래킹 모드가 아닐 때 (자동 표시 모드)
+        // [Case 1] 트래킹 모드가 아닐 때
         if (!_isTracking)
         {
-            // UI 렌더링이 켜져 있을 때만 그리기 (깜빡임 원인 차단)
             if (EnableUIRendering)
             {
                 _ieBoxer.DrawBoxes(_output0BoxCoords, _output1LabelIds, screenW, screenH);
             }
             else
             {
-                _ieBoxer.HideAllBoxes(); // UI 끄기
+                _ieBoxer.HideAllBoxes();
                 _ieMasker.ClearAllMasks();
-            }
-
-            // * 중요: UI를 끄더라도 가장 자신감 있는 물체 하나는 포인트 클라우드로 보여줌
-            if (boxesFound > 0)
-            {
-                // 자동으로 첫 번째 물체를 타겟으로 Point Cloud 생성
-                BoundingBox bestBox = _currentFrameBoxes[0];
-                ExtractDepthData(0, bestBox);
-            }
-            else
-            {
-                CurrentPointCount = 0;
             }
             return;
         }
@@ -317,9 +495,9 @@ public class IEExecutor : MonoBehaviour
                 if (box.ClassName != _lockedTargetBox.Value.ClassName) continue;
 
                 float dist = Vector2.Distance(
-                    new Vector2(box.CenterX, box.CenterY), 
+                    new Vector2(box.CenterX, box.CenterY),
                     new Vector2(_lockedTargetBox.Value.CenterX, _lockedTargetBox.Value.CenterY));
-                
+
                 if (dist < minDist)
                 {
                     minDist = dist;
@@ -328,12 +506,11 @@ public class IEExecutor : MonoBehaviour
                 }
             }
 
-            if (bestIndex != -1 && minDist < 300f) 
+            if (bestIndex != -1 && minDist < 300f)
             {
                 _lockedTargetBox = bestBox;
-                _ieBoxer.HideAllBoxes(); 
+                _ieBoxer.HideAllBoxes();
 
-                // UI 렌더링이 켜진 경우에만 마스크 그리기
                 if (EnableUIRendering)
                 {
                     _ieMasker.DrawSingleMask(bestIndex, bestBox, _output3MaskWeights, _inputSize.x, _inputSize.y);
@@ -342,14 +519,9 @@ public class IEExecutor : MonoBehaviour
                 {
                     _ieMasker.ClearAllMasks();
                 }
-                
-                // * Point Cloud는 무조건 추출 (UI 설정과 무관)
+
+                // * Point Cloud는 무조건 추출
                 ExtractDepthData(bestIndex, bestBox);
-            }
-            else
-            {
-                // 놓쳤을 때: Point Cloud 유지 (Masker 호출 안 함)
-                // _ieMasker.KeepCurrentMask() 호출도 생략하여 부하 줄임
             }
         }
     }
@@ -369,14 +541,14 @@ public class IEExecutor : MonoBehaviour
             float rawHeight = output[i, 3];
 
             float offsetX = (rawCenterX - 320f) * scaleX;
-            float offsetY = (320f - rawCenterY) * scaleY; 
+            float offsetY = (320f - rawCenterY) * scaleY;
 
             var classname = _ieBoxer.GetClassName(labelIds[i]);
 
             boxes.Add(new BoundingBox
             {
-                CenterX = offsetX, 
-                CenterY = offsetY, 
+                CenterX = offsetX,
+                CenterY = offsetY,
                 ClassName = classname,
                 Width = rawWidth * scaleX,
                 Height = rawHeight * scaleY,
@@ -388,7 +560,13 @@ public class IEExecutor : MonoBehaviour
 
     private void ExtractDepthData(int targetIndex, BoundingBox box)
     {
-        if (_cpuDepthTex == null) return;
+        if (_cpuDepthTex == null || !_hasValidDepthPose) return;
+
+        if (_jobInProgress)
+        {
+            _currentJobHandle.Complete();
+            CollectJobResults();
+        }
 
         if (!_intrinsicsCached)
         {
@@ -401,61 +579,94 @@ public class IEExecutor : MonoBehaviour
         int depthH = _cpuDepthTex.height;
         Vector2 sensorRes = _cachedIntrinsics.Resolution;
 
-        int newPointCount = 0;
-
         float screenW = Screen.width;
         float screenH = Screen.height;
-        
+
         float rawBoxCenterX = (box.CenterX / (screenW / 640f)) + 320f;
         float rawBoxCenterY = 320f - (box.CenterY / (screenH / 640f));
         float rawBoxWidth = box.Width / (screenW / 640f);
         float rawBoxHeight = box.Height / (screenH / 640f);
 
-        for (int y = 0; y < 160; y += _samplingStep)
+        const int maskW = 160;
+        const int maskH = 160;
+        int totalJobs = (maskW / _samplingStep) * (maskH / _samplingStep);
+
+        if (!_jobPositions.IsCreated || _jobPositions.Length != totalJobs)
         {
-            for (int x = 0; x < 160; x += _samplingStep)
+            DisposeJobArrays();
+            _jobPositions = new NativeArray<float3>(totalJobs, Allocator.Persistent);
+            _jobDepths = new NativeArray<float>(totalJobs, Allocator.Persistent);
+            _jobValid = new NativeArray<int>(totalJobs, Allocator.Persistent);
+        }
+
+        if (!_jobDepthData.IsCreated || _jobDepthData.Length != depthData.Length)
+        {
+            if (_jobDepthData.IsCreated) _jobDepthData.Dispose();
+            _jobDepthData = new NativeArray<ushort>(depthData.Length, Allocator.Persistent);
+        }
+        NativeArray<ushort>.Copy(depthData.ToArray(), _jobDepthData);
+
+        int maskDataSize = maskW * maskH;
+        if (!_jobMaskData.IsCreated || _jobMaskData.Length != maskDataSize)
+        {
+            if (_jobMaskData.IsCreated) _jobMaskData.Dispose();
+            _jobMaskData = new NativeArray<float>(maskDataSize, Allocator.Persistent);
+        }
+        for (int y = 0; y < maskH; y++)
+        {
+            for (int x = 0; x < maskW; x++)
             {
-                if (newPointCount >= _maxPoints) break;
-
-                float maskVal = _output3MaskWeights[targetIndex, y, x];
-                if (maskVal > _confidenceThreshold)
-                {
-                    float normX = (float)x / 160f;
-                    float normY = (float)y / 160f;
-                    
-                    float imgPixelX = rawBoxCenterX - (rawBoxWidth * 0.5f) + (normX * rawBoxWidth);
-                    float imgPixelY = rawBoxCenterY - (rawBoxHeight * 0.5f) + (normY * rawBoxHeight);
-
-                    float u = Mathf.Clamp01(imgPixelX / 640f);
-                    float v = Mathf.Clamp01(imgPixelY / 640f); 
-
-                    int dx = Mathf.FloorToInt(u * (depthW - 1));
-                    int dy = Mathf.FloorToInt((1.0f - v) * (depthH - 1));
-
-                    int depthIndex = dy * depthW + dx;
-                    if (depthIndex < 0 || depthIndex >= depthData.Length) continue;
-                    float depthMeters = Mathf.HalfToFloat(depthData[depthIndex]);
-
-                    if (depthMeters > 0.1f && depthMeters < 3.0f)
-                    {
-                        Vector2Int cameraPixel = new Vector2Int(
-                            Mathf.FloorToInt(u * sensorRes.x), 
-                            Mathf.FloorToInt((1.0f - v) * sensorRes.y)
-                        );
-
-                        Ray worldRay = PassthroughCameraUtils.ScreenPointToRayInWorld(PassthroughCameraEye.Left, cameraPixel);
-                        Vector3 worldPos = worldRay.GetPoint(depthMeters);
-
-                        PointBuffer[newPointCount].worldPos = worldPos;
-                        
-                        float normalizedDepth = Mathf.Clamp01((depthMeters - 0.2f) / 2.0f);
-                        PointBuffer[newPointCount].color = _depthGradient.Evaluate(normalizedDepth);
-
-                        newPointCount++;
-                    }
-                }
+                _jobMaskData[y * maskW + x] = _output3MaskWeights[targetIndex, y, x];
             }
         }
+
+        var job = new DepthExtractionJob
+        {
+            depthData = _jobDepthData,
+            maskData = _jobMaskData,
+            depthW = depthW,
+            depthH = depthH,
+            maskW = maskW,
+            maskH = maskH,
+            samplingStep = _samplingStep,
+            confidenceThreshold = _confidenceThreshold,
+            rawBoxCenterX = rawBoxCenterX,
+            rawBoxCenterY = rawBoxCenterY,
+            rawBoxWidth = rawBoxWidth,
+            rawBoxHeight = rawBoxHeight,
+            depthCameraPose = _depthCameraPose,
+            depthCameraRot = new quaternion(_depthCameraRot.x, _depthCameraRot.y, _depthCameraRot.z, _depthCameraRot.w),
+            focalLength = new float2(_cachedIntrinsics.FocalLength.x, _cachedIntrinsics.FocalLength.y),
+            principalPoint = new float2(_cachedIntrinsics.PrincipalPoint.x, _cachedIntrinsics.PrincipalPoint.y),
+            sensorRes = new float2(sensorRes.x, sensorRes.y),
+            outPositions = _jobPositions,
+            outDepths = _jobDepths,
+            outValid = _jobValid
+        };
+
+        _currentJobHandle = job.Schedule(totalJobs, 64);
+        _jobInProgress = true;
+        _currentJobHandle.Complete();
+        CollectJobResults();
+    }
+
+    private void CollectJobResults()
+    {
+        if (!_jobInProgress) return;
+
+        int newPointCount = 0;
+        for (int i = 0; i < _jobValid.Length && newPointCount < _maxPoints; i++)
+        {
+            if (_jobValid[i] == 1)
+            {
+                PointBuffer[newPointCount].worldPos = _jobPositions[i];
+                float normalizedDepth = Mathf.Clamp01((_jobDepths[i] - 0.2f) / 2.0f);
+                PointBuffer[newPointCount].color = _depthGradient.Evaluate(normalizedDepth);
+                newPointCount++;
+            }
+        }
+
+        _jobInProgress = false;
 
         if (newPointCount > 0)
         {
@@ -468,6 +679,15 @@ public class IEExecutor : MonoBehaviour
             Array.Copy(_backupBuffer, PointBuffer, _backupCount);
             CurrentPointCount = _backupCount;
         }
+    }
+
+    private void DisposeJobArrays()
+    {
+        if (_jobPositions.IsCreated) _jobPositions.Dispose();
+        if (_jobDepths.IsCreated) _jobDepths.Dispose();
+        if (_jobValid.IsCreated) _jobValid.Dispose();
+        if (_jobDepthData.IsCreated) _jobDepthData.Dispose();
+        if (_jobMaskData.IsCreated) _jobMaskData.Dispose();
     }
 
     private void CleanupResources()
@@ -487,15 +707,70 @@ public class IEExecutor : MonoBehaviour
         CurrentPointCount = 0;
         _backupCount = 0;
         _ieMasker.ClearAllMasks();
-        _ieBoxer.HideAllBoxes(); 
+        _ieBoxer.HideAllBoxes();
         Debug.Log("[IEExecutor] Tracking Reset");
     }
 
+    public void ClearPointCloud()
+    {
+        CurrentPointCount = 0;
+        _backupCount = 0;
+    }
+
+    // 레이저가 가리키는 위치의 물체에 대해 Point Cloud 생성
+    public void ExtractPointCloudAtScreenPos(Vector2 screenPos)
+    {
+        if (_currentFrameBoxes == null || _currentFrameBoxes.Count == 0) return;
+        if (_output3MaskWeights == null) return;
+
+        float halfScreenW = Screen.width / 2f;
+        float halfScreenH = Screen.height / 2f;
+        Vector2 screenPosCentered = new Vector2(screenPos.x - halfScreenW, screenPos.y - halfScreenH);
+
+        // [수정] 변수 선언 확인
+        float minDistance = float.MaxValue; 
+        int bestIndex = -1;
+        BoundingBox bestBox = default;
+
+        for (int i = 0; i < _currentFrameBoxes.Count; i++)
+        {
+            var box = _currentFrameBoxes[i];
+            float margin = 50f; // 터치 허용 범위
+            if (screenPosCentered.x >= box.CenterX - box.Width / 2f - margin &&
+                screenPosCentered.x <= box.CenterX + box.Width / 2f + margin &&
+                screenPosCentered.y >= box.CenterY - box.Height / 2f - margin &&
+                screenPosCentered.y <= box.CenterY + box.Height / 2f + margin)
+            {
+                float dist = Vector2.Distance(screenPosCentered, new Vector2(box.CenterX, box.CenterY));
+                if (dist < minDistance)
+                {
+                    minDistance = dist;
+                    bestIndex = i;
+                    bestBox = box;
+                }
+            }
+        }
+
+        if (bestIndex != -1)
+        {
+            ExtractDepthData(bestIndex, bestBox);
+        }
+        else
+        {
+            // 해당 위치에 물체가 없으면 Point Cloud 클리어
+            ClearPointCloud();
+        }
+    }
+
+    /// <summary>
+    /// 트리거(또는 버튼) 입력 시 호출하여 특정 타겟을 추적 시작
+    /// </summary>
     public void SelectTargetFromScreenPos(Vector2 screenPos)
     {
         if (_currentFrameBoxes == null || _currentFrameBoxes.Count == 0) return;
 
-        float minDistance = float.MaxValue;
+        // [수정] 변수 선언 확인 (이 줄이 없어서 에러가 났을 수 있습니다)
+        float minDistance = float.MaxValue; 
         BoundingBox? bestBox = null;
         
         float halfScreenW = Screen.width / 2f;
@@ -511,6 +786,8 @@ public class IEExecutor : MonoBehaviour
                 screenPosCentered.y <= box.CenterY + box.Height/2f + margin)
             {
                 float dist = Vector2.Distance(screenPosCentered, new Vector2(box.CenterX, box.CenterY));
+                
+                // 여기서 minDistance를 사용합니다.
                 if (dist < minDistance)
                 {
                     minDistance = dist;
