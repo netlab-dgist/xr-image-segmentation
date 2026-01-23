@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Reflection;
 using Unity.InferenceEngine;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -10,12 +11,7 @@ public class IEExecutor : MonoBehaviour
 {
     enum InferenceDownloadState
     {
-        Running = 0,
-        RequestingOutputs = 1,
-        Success = 2,
-        Error = 3,
-        Cleanup = 4,
-        Completed = 5
+        Running = 0, RequestingOutputs = 1, Success = 2, Error = 3, Cleanup = 4, Completed = 5
     }
 
     [Header("Model Settings")]
@@ -23,7 +19,7 @@ public class IEExecutor : MonoBehaviour
     [SerializeField] private BackendType _backend = BackendType.GPUCompute;
     [SerializeField] private ModelAsset _sentisModel;
     [SerializeField] private int _layersPerFrame = 12;
-    [SerializeField] private float _confidenceThreshold = 0.5f;
+    [SerializeField] private float _confidenceThreshold = 0.3f;
     [SerializeField] private Transform _displayLocation;
 
     [Header("Natural Tracking Settings")]
@@ -40,8 +36,8 @@ public class IEExecutor : MonoBehaviour
     [SerializeField] private PointCloudRenderer _pointCloudRenderer;
 
     [Header("Optimization Settings")]
-    [Range(2, 8)]
-    [SerializeField] private int _samplingStep = 4;
+    [Range(1, 8)]
+    [SerializeField] private int _samplingStep = 1;
 
     public bool IsModelLoaded { get; private set; } = false;
     public bool IsTracking => _isTracking;
@@ -59,13 +55,11 @@ public class IEExecutor : MonoBehaviour
     private readonly Tensor[] _outputBuffers = new Tensor[4];
     private readonly bool[] _readbackComplete = new bool[4];
     
-    // 현재 프레임의 결과 텐서
     private Tensor<float> _output0BoxCoords;
     private Tensor<int> _output1LabelIds;
     private Tensor<float> _output2Masks;
     private Tensor<float> _output3MaskWeights;
 
-    // [최적화] 항상 최신 프레임의 데이터를 CPU 배열로 유지 (스냅샷용)
     private float[] _latestBoxData;
     private float[] _latestMaskWeights;
     private int _latestBoxCount;
@@ -96,15 +90,6 @@ public class IEExecutor : MonoBehaviour
     private void Update()
     {
         UpdateInference();
-        // [수정] Point Cloud 위치 고정 (Snapshot 이후 위치 업데이트 중단)
-        // 만약 물체를 따라다니게 하고 싶다면 아래 주석을 해제하세요.
-        /*
-        if (_isTracking && _pointCloudRenderer.IsMeshGenerated && _lockedTargetBox.HasValue)
-        {
-            Ray ray = GetRayFromScreenBox(_lockedTargetBox.Value);
-            _pointCloudRenderer.UpdateTransform(_lockedTargetBox.Value, ray);
-        }
-        */
     }
 
     private void OnDestroy()
@@ -208,8 +193,6 @@ public class IEExecutor : MonoBehaviour
 
     private void ProcessSuccessState()
     {
-        // [중요] 최신 데이터를 항상 CPU 배열에 캐싱해둡니다. (Snapshot용)
-        // 텐서가 살아있을 때 안전하게 복사
         try
         {
             if (_output0BoxCoords != null && _output3MaskWeights != null)
@@ -219,10 +202,7 @@ public class IEExecutor : MonoBehaviour
                 _latestBoxCount = _output0BoxCoords.shape[0];
             }
         }
-        catch (Exception e)
-        {
-            Debug.LogWarning($"[IEExecutor] Failed to cache frame data: {e.Message}");
-        }
+        catch (Exception e) { Debug.LogWarning($"[IEExecutor] Failed to cache: {e.Message}"); }
 
         List<BoundingBox> currentFrameBoxes = _ieBoxer.DrawBoxes(_output0BoxCoords, _output1LabelIds, _inputSize.x, _inputSize.y);
         _currentFrameBoxes.Clear();
@@ -267,44 +247,194 @@ public class IEExecutor : MonoBehaviour
     public void CaptureSnapshot()
     {
         if (!_isTracking || !_lockedTargetBox.HasValue) return;
-        
-        // GameObject 활성화 체크
         if (!gameObject.activeInHierarchy) gameObject.SetActive(true);
         if (!enabled) enabled = true;
 
         if (_latestBoxData == null || _latestMaskWeights == null)
         {
-            Debug.LogWarning("[Snapshot] No cached inference data available.");
+            Debug.LogWarning("[Snapshot] No cached inference data.");
             return;
         }
-
-        Debug.Log($"[Snapshot] Using cached data. BoxCount: {_latestBoxCount}");
+        Debug.Log($"[Snapshot] Cached BoxCount: {_latestBoxCount}");
         StartCoroutine(CaptureRoutine());
     }
 
     private IEnumerator CaptureRoutine()
     {
-        Debug.Log("[Snapshot] Starting Capture Routine...");
+        Debug.Log("[Snapshot] Starting...");
         yield return PrepareDepthDataAsync();
         yield return PrepareRgbDataAsync();
 
         if (_cpuDepthTex == null || _rgbPixelCache == null) { Debug.LogError("[Snapshot] Data Missing."); yield break; }
 
-        // 캐시된 배열에서 매칭되는 물체 찾기
         int targetIndex = FindBestMatchIndexFromCache();
-        if (targetIndex == -1) { Debug.LogWarning("[Snapshot] No matching object found in cache."); yield break; }
+        if (targetIndex == -1) { Debug.LogWarning("[Snapshot] No matching object found."); yield break; }
 
-        Debug.Log($"[Snapshot] Extracting points for index {targetIndex}...");
-        var points = new List<Vector3>();
-        var colors = new List<Color32>();
-        float avgDepth = ExtractPointsFromCache(targetIndex, _lockedTargetBox.Value, points, colors);
+        Debug.Log($"[Snapshot] Extracting grid for Mesh...");
+        
+        int gridW = 160 / _samplingStep;
+        int gridH = 160 / _samplingStep;
+        Vector3[] worldGrid = new Vector3[gridW * gridH];
+        Color32[] colorGrid = new Color32[gridW * gridH];
+        bool[] validGrid = new bool[gridW * gridH];
+        Vector3 centerPos = Vector3.zero;
+        int validCount = 0;
 
-        if (points.Count > 0) 
+        ExtractGridFromCache(targetIndex, _lockedTargetBox.Value, worldGrid, colorGrid, validGrid, ref centerPos, ref validCount);
+
+        if (validCount > 0) 
         {
-            _pointCloudRenderer.GenerateMesh(points, colors, _lockedTargetBox.Value, avgDepth);
-            Debug.Log($"[Snapshot] Point Cloud Generated! Points: {points.Count}");
+            centerPos /= validCount; 
+            _pointCloudRenderer.GenerateTriangleMesh(worldGrid, colorGrid, validGrid, gridW, gridH, centerPos);
+            Debug.Log($"[Snapshot] Mesh Generated! Verts: {validCount}");
         }
         else Debug.LogWarning("[Snapshot] No valid points extracted.");
+    }
+
+    private void ExtractGridFromCache(int targetIndex, BoundingBox box, Vector3[] worldGrid, Color32[] colorGrid, bool[] validGrid, ref Vector3 centerPosSum, ref int validCount)
+    {
+        var depthData = _cpuDepthTex.GetRawTextureData<ushort>();
+        int rgbW = _rgbRenderTexture.width;
+        int rgbH = _rgbRenderTexture.height;
+        int depthW = _cpuDepthTex.width;
+        int depthH = _cpuDepthTex.height;
+
+        // EnvironmentDepthManager에서 frameDescriptors 가져오기 (internal이라 Reflection 사용)
+        float tanLeft, tanRight, tanTop, tanBottom;
+        Vector3 depthCamPos;
+        Quaternion depthCamRot;
+        Matrix4x4 trackingToWorld = Matrix4x4.identity;
+
+        try
+        {
+            var frameDescField = typeof(EnvironmentDepthManager).GetField("frameDescriptors", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
+            if (frameDescField == null)
+            {
+                Debug.LogError("[Snapshot] Cannot find frameDescriptors field! Using fallback.");
+                UseFallbackProjection(out tanLeft, out tanRight, out tanTop, out tanBottom, out depthCamPos, out depthCamRot);
+            }
+            else
+            {
+                var frameDescriptors = frameDescField.GetValue(_depthManager) as Array;
+                if (frameDescriptors == null || frameDescriptors.Length == 0)
+                {
+                    Debug.LogError("[Snapshot] frameDescriptors is null or empty! Using fallback.");
+                    UseFallbackProjection(out tanLeft, out tanRight, out tanTop, out tanBottom, out depthCamPos, out depthCamRot);
+                }
+                else
+                {
+                    object depthFrameDesc = frameDescriptors.GetValue(0);
+                    Type descType = depthFrameDesc.GetType();
+
+                    Debug.Log($"[Snapshot] DepthFrameDesc type: {descType.FullName}");
+
+                    // internal 필드 접근 - NonPublic 플래그 사용
+                    var leftField = descType.GetField("fovLeftAngleTangent", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
+                    var rightField = descType.GetField("fovRightAngleTangent", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
+                    var topField = descType.GetField("fovTopAngleTangent", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
+                    var bottomField = descType.GetField("fovDownAngleTangent", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
+                    var posField = descType.GetField("createPoseLocation", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
+                    var rotField = descType.GetField("createPoseRotation", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
+
+                    if (leftField == null || rightField == null || topField == null || bottomField == null)
+                    {
+                        Debug.LogError($"[Snapshot] Cannot find FOV fields! Left:{leftField != null}, Right:{rightField != null}, Top:{topField != null}, Bottom:{bottomField != null}");
+                        // 모든 필드 이름 출력
+                        Debug.Log($"[Snapshot] Available fields in {descType.Name}:");
+                        foreach (var f in descType.GetFields(BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public))
+                        {
+                            Debug.Log($"  - {f.Name} ({f.FieldType.Name})");
+                        }
+                        UseFallbackProjection(out tanLeft, out tanRight, out tanTop, out tanBottom, out depthCamPos, out depthCamRot);
+                    }
+                    else
+                    {
+                        tanLeft = (float)leftField.GetValue(depthFrameDesc);
+                        tanRight = (float)rightField.GetValue(depthFrameDesc);
+                        tanTop = (float)topField.GetValue(depthFrameDesc);
+                        tanBottom = (float)bottomField.GetValue(depthFrameDesc);
+                        depthCamPos = posField != null ? (Vector3)posField.GetValue(depthFrameDesc) : Vector3.zero;
+                        depthCamRot = rotField != null ? (Quaternion)rotField.GetValue(depthFrameDesc) : Quaternion.identity;
+                    }
+                }
+            }
+
+            // Tracking space -> World 변환
+            var trackingSpaceMethod = typeof(EnvironmentDepthManager).GetMethod("GetTrackingSpaceWorldToLocalMatrix", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
+            if (trackingSpaceMethod != null)
+            {
+                Matrix4x4 worldToTracking = (Matrix4x4)trackingSpaceMethod.Invoke(_depthManager, null);
+                trackingToWorld = worldToTracking.inverse;
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"[Snapshot] Reflection failed: {ex.Message}\n{ex.StackTrace}");
+            UseFallbackProjection(out tanLeft, out tanRight, out tanTop, out tanBottom, out depthCamPos, out depthCamRot);
+        }
+
+        Debug.Log($"[Snapshot] Depth FOV tangents: L={tanLeft:F3}, R={tanRight:F3}, T={tanTop:F3}, B={tanBottom:F3}");
+        Debug.Log($"[Snapshot] Depth Cam Pos: {depthCamPos}, Rot: {depthCamRot.eulerAngles}");
+        Debug.Log($"[Snapshot] RGB: {rgbW}x{rgbH}, Depth: {depthW}x{depthH}");
+
+        int maskSize = 160 * 160;
+        int maskOffset = targetIndex * maskSize;
+        int gridIndex = 0;
+
+        for (int y = 0; y < 160; y += _samplingStep)
+        {
+            for (int x = 0; x < 160; x += _samplingStep)
+            {
+                float maskVal = _latestMaskWeights[maskOffset + (y * 160 + x)];
+
+                if (maskVal > _confidenceThreshold)
+                {
+                    // Mask -> RGB 픽셀 좌표
+                    Vector2Int rgbPixel = MapMaskToRGBPixel(x, y, box, rgbW, rgbH);
+                    int pixelIdx = rgbPixel.y * rgbW + rgbPixel.x;
+
+                    if (pixelIdx < 0 || pixelIdx >= _rgbPixelCache.Length) { gridIndex++; continue; }
+
+                    // RGB -> Depth UV (0~1)
+                    float u = (float)rgbPixel.x / rgbW;
+                    float v = (float)rgbPixel.y / rgbH;
+
+                    int dx = Mathf.FloorToInt(u * (depthW - 1));
+                    int dy = Mathf.FloorToInt(v * (depthH - 1));
+                    float depthMeters = Mathf.HalfToFloat(depthData[dy * depthW + dx]);
+
+                    if (depthMeters > 0.1f && depthMeters < 5.0f)
+                    {
+                        // Depth UV를 사용해 카메라 로컬 방향 계산 (FOV tangent 기반)
+                        // UV (0,0) = 좌상단, (1,1) = 우하단
+                        // X: u=0 -> -tanLeft, u=1 -> tanRight
+                        // Y: v=0 -> tanTop, v=1 -> -tanBottom
+                        float dirX = Mathf.Lerp(-tanLeft, tanRight, u);
+                        float dirY = Mathf.Lerp(tanTop, -tanBottom, v);
+                        float dirZ = 1.0f;
+
+                        // 로컬 3D 좌표 (depth 카메라 공간)
+                        Vector3 localPoint = new Vector3(dirX, dirY, dirZ) * depthMeters;
+
+                        // Meta SDK 방식: scale(1,1,-1) 적용 후 rotation, translation
+                        Vector3 scaledLocal = new Vector3(localPoint.x, localPoint.y, -localPoint.z);
+                        Vector3 trackingPos = depthCamPos + depthCamRot * scaledLocal;
+
+                        // Tracking Space -> World Space
+                        Vector3 worldPos = trackingToWorld.MultiplyPoint3x4(trackingPos);
+
+                        worldGrid[gridIndex] = worldPos;
+                        colorGrid[gridIndex] = _rgbPixelCache[pixelIdx];
+                        validGrid[gridIndex] = true;
+                        centerPosSum += worldPos;
+                        validCount++;
+                    }
+                }
+                gridIndex++;
+            }
+        }
+
+        Debug.Log($"[Snapshot] Valid points: {validCount} / {gridIndex}");
     }
 
     private int FindBestMatchIndexFromCache()
@@ -325,52 +455,6 @@ public class IEExecutor : MonoBehaviour
             if (iou > bestIoU) { bestIoU = iou; bestIdx = i; }
         }
         return (bestIoU > 0.3f) ? bestIdx : -1;
-    }
-
-    private float ExtractPointsFromCache(int targetIndex, BoundingBox box, List<Vector3> outPoints, List<Color32> outColors)
-    {
-        if (!_intrinsicsCached) { _cachedIntrinsics = PassthroughCameraSamples.PassthroughCameraUtils.GetCameraIntrinsics(PassthroughCameraSamples.PassthroughCameraEye.Left); _intrinsicsCached = true; }
-        Pose cameraPose = PassthroughCameraSamples.PassthroughCameraUtils.GetCameraPoseInWorld(PassthroughCameraSamples.PassthroughCameraEye.Left);
-        
-        float fx = _cachedIntrinsics.FocalLength.x; float fy = _cachedIntrinsics.FocalLength.y;
-        float cx = _cachedIntrinsics.PrincipalPoint.x; float cy = _cachedIntrinsics.PrincipalPoint.y;
-
-        var depthData = _cpuDepthTex.GetRawTextureData<ushort>();
-        int rgbW = _rgbRenderTexture.width; int rgbH = _rgbRenderTexture.height;
-        int depthW = _cpuDepthTex.width; int depthH = _cpuDepthTex.height;
-
-        float totalDepth = 0f; int depthCount = 0;
-        int maskSize = 160 * 160;
-        int maskOffset = targetIndex * maskSize;
-
-        for (int y = 0; y < 160; y += _samplingStep)
-        {
-            for (int x = 0; x < 160; x += _samplingStep)
-            {
-                if (outPoints.Count >= _maxPoints) break;
-                // 캐시된 1차원 배열에서 마스크 값 읽기
-                float maskVal = _latestMaskWeights[maskOffset + (y * 160 + x)];
-                if (maskVal > _confidenceThreshold)
-                {
-                    Vector2Int rgbPixel = MapMaskToRGBPixel(x, y, box, rgbW, rgbH);
-                    int pixelIdx = rgbPixel.y * rgbW + rgbPixel.x;
-                    if (pixelIdx < 0 || pixelIdx >= _rgbPixelCache.Length) continue;
-
-                    float u = (float)rgbPixel.x / rgbW; float v = (float)rgbPixel.y / rgbH;
-                    int dx = Mathf.FloorToInt(u * (depthW - 1)); int dy = Mathf.FloorToInt(v * (depthH - 1));
-                    float depthMeters = Mathf.HalfToFloat(depthData[dy * depthW + dx]);
-
-                    if (depthMeters > 0.1f && depthMeters < 3.0f)
-                    {
-                        Vector3 dirInCamera = new Vector3((rgbPixel.x - cx) / fx, (rgbPixel.y - cy) / fy, 1f);
-                        Vector3 worldPos = cameraPose.position + (cameraPose.rotation * dirInCamera).normalized * depthMeters;
-                        outPoints.Add(worldPos); outColors.Add(_rgbPixelCache[pixelIdx]);
-                        totalDepth += depthMeters; depthCount++;
-                    }
-                }
-            }
-        }
-        return depthCount > 0 ? (totalDepth / depthCount) : 1.0f;
     }
 
     private IEnumerator PrepareDepthDataAsync()
@@ -423,26 +507,26 @@ public class IEExecutor : MonoBehaviour
         if (bestBox.HasValue) { _lockedTargetBox = bestBox.Value; _isTracking = true; _consecutiveLostFrames = 0; _centerVelocity = Vector2.zero; _sizeVelocity = Vector2.zero; _currentSmoothTime = _maxSmoothTime; if (_pointCloudRenderer != null) _pointCloudRenderer.ClearMesh(); Debug.Log($"[IEExecutor] Target Selected: {bestBox.Value.ClassName}"); }
     }
 
-    public void ResetTracking() 
-    { 
-        _isTracking = false; 
-        _lockedTargetBox = null; 
-        _consecutiveLostFrames = 0; 
-        
-        if (_ieMasker != null) _ieMasker.ClearAllMasks(); 
-        if (_pointCloudRenderer != null) _pointCloudRenderer.ClearMesh(); 
-        
-        // [수정] 박스 렌더링 재개 확인
-        if (_ieBoxer != null)
-        {
-            _ieBoxer.ClearBoxes(0); // 모든 박스 일단 지우기
-            // DrawBoxes는 다음 UpdateInference에서 호출됨
-        }
-
-        Debug.Log($"[IEExecutor] Tracking Reset. Inference Running: {IsRunning()}"); 
-    }
+    public void ResetTracking() { _isTracking = false; _lockedTargetBox = null; _consecutiveLostFrames = 0; if (_ieMasker != null) _ieMasker.ClearAllMasks(); if (_pointCloudRenderer != null) _pointCloudRenderer.ClearMesh(); if (_ieBoxer != null) _ieBoxer.ClearBoxes(0); Debug.Log("[IEExecutor] Tracking Reset"); }
 
     private void CleanupResources() { _output0BoxCoords?.Dispose(); _output1LabelIds?.Dispose(); _output2Masks?.Dispose(); _output3MaskWeights?.Dispose(); _readbacksInitiated = false; }
+
+    private void UseFallbackProjection(out float tanLeft, out float tanRight, out float tanTop, out float tanBottom, out Vector3 depthCamPos, out Quaternion depthCamRot)
+    {
+        // Quest 3 Depth 센서 대략적인 FOV (약 90도 수평/수직)
+        // tan(45도) = 1.0
+        tanLeft = 1.0f;
+        tanRight = 1.0f;
+        tanTop = 1.0f;
+        tanBottom = 1.0f;
+
+        // Passthrough 카메라 Pose를 대신 사용
+        Pose camPose = PassthroughCameraSamples.PassthroughCameraUtils.GetCameraPoseInWorld(PassthroughCameraSamples.PassthroughCameraEye.Left);
+        depthCamPos = camPose.position;
+        depthCamRot = camPose.rotation;
+
+        Debug.LogWarning("[Snapshot] Using FALLBACK depth projection - results may be inaccurate!");
+    }
 
     private void UpdateSmoothBox(BoundingBox bestBox)
     {
@@ -469,9 +553,18 @@ public class IEExecutor : MonoBehaviour
 
     private Vector2Int MapMaskToRGBPixel(int maskX, int maskY, BoundingBox box, int rgbW, int rgbH)
     {
-        float normX = (float)maskX / 160f; float normY = (float)maskY / 160f;
-        int pixelX = Mathf.RoundToInt((box.CenterX - box.Width/2f + normX * box.Width) + rgbW/2f);
-        int pixelY = Mathf.RoundToInt(rgbH/2f - (box.CenterY - box.Height/2f + normY * box.Height));
-        return new Vector2Int(Mathf.Clamp(pixelX, 0, rgbW - 1), Mathf.Clamp(pixelY, 0, rgbH - 1));
+        float normX = (float)maskX / 160f;
+        float normY = (float)maskY / 160f;
+
+        float texCenterX = box.CenterX + (rgbW * 0.5f);
+        float texCenterY = (rgbH * 0.5f) - box.CenterY;
+
+        float boxLeft = texCenterX - (box.Width * 0.5f);
+        float boxTop = texCenterY + (box.Height * 0.5f);
+
+        float pixelX = boxLeft + (normX * box.Width);
+        float pixelY = boxTop - (normY * box.Height);
+
+        return new Vector2Int(Mathf.Clamp(Mathf.RoundToInt(pixelX), 0, rgbW - 1), Mathf.Clamp(Mathf.RoundToInt(pixelY), 0, rgbH - 1));
     }
 }

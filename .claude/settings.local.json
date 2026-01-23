@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(xargs ls:*)"
+      "Bash(xargs ls:*)",
+      "Bash(dir /s /b \"C:\\\\Users\\\\netla\\\\Desktop\\\\25_winter_project\\\\xr-image-segmentation\\\\Library\\\\PackageCache\\\\*EnvironmentDepth*.cs\")"
     ]
   }
 }

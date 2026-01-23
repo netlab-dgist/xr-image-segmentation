@@ -1370,9 +1370,9 @@ MonoBehaviour:
   _sizeSmoothTime: 0.3
   _depthManager: {fileID: 700560618}
   _webCamManager: {fileID: 1675638408}
-  _maxPoints: 8000
+  _maxPoints: 1000
   _pointCloudRenderer: {fileID: 787607881}
-  _samplingStep: 4
+  _samplingStep: 1
   _ieBoxer: {fileID: 568621722}
 --- !u!114 &787607881
 MonoBehaviour:
@@ -1386,8 +1386,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: fbe5c7d2be80e8b439c6cd22bc9a20ec, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  _pointCloudMaterial: {fileID: 2100000, guid: 6db31c053cbebad49868bcea1f8ad457, type: 2}
-  _pointSize: 0.01
+  _pointCloudMaterial: {fileID: 2100000, guid: 330e26292327d9d4685a14e54e88b0b6, type: 2}
+  _pointSize: 0.3
+  _meshConnectionDistance: 0.5
 --- !u!1 &832575517
 GameObject:
   m_ObjectHideFlags: 0
