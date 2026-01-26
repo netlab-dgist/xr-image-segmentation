@@ -37,11 +37,15 @@ public class IEExecutor : MonoBehaviour
     [SerializeField] private EnvironmentDepthManager _depthManager;
     [SerializeField] private PassthroughCameraSamples.WebCamTextureManager _webCamManager;
     [SerializeField] private bool _captureRGBD = true;
-    [SerializeField] private int _maxPoints = 8000;
+    [SerializeField] private int _maxPoints = 102400;
 
     [Header("Optimization Settings")]
-    [Range(2, 8)]
-    [SerializeField] private int _samplingStep = 4;
+    [Range(1, 8)]
+    [SerializeField] private int _samplingStep = 1;
+
+    [Tooltip("각 마스크 픽셀 내 서브샘플링 (2 = 2x2 = 4배 밀도)")]
+    [Range(1, 4)]
+    [SerializeField] private int _subSamplingFactor = 2;
 
     public struct RGBDPoint {
         public Vector3 worldPos;
@@ -443,6 +447,16 @@ public class IEExecutor : MonoBehaviour
         int depthH = _cpuDepthTex.height;
 
         CurrentPointCount = 0;
+        int maskPixelCount = 0;
+        int depthFilteredCount = 0;
+        float minDepth = float.MaxValue;
+        float maxDepth = float.MinValue;
+        float sumDepth = 0f;
+        int depthSampleCount = 0;
+
+        // 서브샘플링 오프셋 계산 (마스크 1픽셀 내에서의 서브픽셀 위치)
+        float subStep = 1.0f / _subSamplingFactor;
+
         for (int y = 0; y < 160; y += _samplingStep)
         {
             for (int x = 0; x < 160; x += _samplingStep)
@@ -451,35 +465,70 @@ public class IEExecutor : MonoBehaviour
                 float maskVal = _output3MaskWeights[targetIndex, y, x];
                 if (maskVal > _confidenceThreshold)
                 {
-                    Vector2Int rgbPixel = MapMaskToRGBPixel(x, y, box, rgbW, rgbH);
-                    
-                    // [Fix] Removed (rgbH - 1 - ...) inversion to match Unity Bottom-Up coords
-                    int pixelIdx = rgbPixel.y * rgbW + rgbPixel.x;
-                    
-                    if (pixelIdx < 0 || pixelIdx >= _rgbPixelCache.Length) continue;
+                    maskPixelCount++;
 
-                    float u = (float)rgbPixel.x / rgbW;
-                    float v = (float)rgbPixel.y / rgbH;
-                    int dx = Mathf.FloorToInt(u * (depthW - 1));
-                    int dy = Mathf.FloorToInt(v * (depthH - 1));
-                    float depthMeters = Mathf.HalfToFloat(depthData[dy * depthW + dx]);
-
-                    if (depthMeters > 0.1f && depthMeters < 3.0f)
+                    // 서브샘플링: 각 마스크 픽셀 내에서 여러 포인트 생성
+                    for (int sy = 0; sy < _subSamplingFactor; sy++)
                     {
-                        Vector3 dirInCamera = new Vector3(
-                            (rgbPixel.x - cx) / fx,
-                            (rgbPixel.y - cy) / fy,
-                            1f
-                        );
-                        Vector3 dirInWorld = cameraRot * dirInCamera;
-                        Vector3 worldPos = cameraPos + dirInWorld.normalized * depthMeters;
+                        for (int sx = 0; sx < _subSamplingFactor; sx++)
+                        {
+                            if (CurrentPointCount >= _maxPoints) break;
 
-                        PointBuffer[CurrentPointCount].worldPos = worldPos;
-                        PointBuffer[CurrentPointCount].color = _rgbPixelCache[pixelIdx];
-                        CurrentPointCount++;
+                            // 서브픽셀 오프셋을 적용한 마스크 좌표 (0~1 범위 내 오프셋)
+                            float subMaskX = x + sx * subStep;
+                            float subMaskY = y + sy * subStep;
+
+                            // 서브픽셀 좌표로 RGB 픽셀 매핑
+                            Vector2Int rgbPixel = MapMaskToRGBPixelFloat(subMaskX, subMaskY, box, rgbW, rgbH);
+
+                            int pixelIdx = rgbPixel.y * rgbW + rgbPixel.x;
+                            if (pixelIdx < 0 || pixelIdx >= _rgbPixelCache.Length) continue;
+
+                            float u = (float)rgbPixel.x / rgbW;
+                            float v = (float)rgbPixel.y / rgbH;
+                            int dx = Mathf.FloorToInt(u * (depthW - 1));
+                            int dy = Mathf.FloorToInt(v * (depthH - 1));
+                            float depthMeters = Mathf.HalfToFloat(depthData[dy * depthW + dx]);
+
+                            // 디버그용 depth 통계 (첫 번째 서브샘플만)
+                            if (sx == 0 && sy == 0 && depthMeters > 0f)
+                            {
+                                minDepth = Mathf.Min(minDepth, depthMeters);
+                                maxDepth = Mathf.Max(maxDepth, depthMeters);
+                                sumDepth += depthMeters;
+                                depthSampleCount++;
+                            }
+
+                            if (depthMeters > 0.1f && depthMeters < 3.0f)
+                            {
+                                Vector3 dirInCamera = new Vector3(
+                                    (rgbPixel.x - cx) / fx,
+                                    (rgbPixel.y - cy) / fy,
+                                    1f
+                                );
+                                Vector3 dirInWorld = cameraRot * dirInCamera;
+                                Vector3 worldPos = cameraPos + dirInWorld.normalized * depthMeters;
+
+                                PointBuffer[CurrentPointCount].worldPos = worldPos;
+                                PointBuffer[CurrentPointCount].color = _rgbPixelCache[pixelIdx];
+                                CurrentPointCount++;
+                            }
+                            else if (sx == 0 && sy == 0)
+                            {
+                                depthFilteredCount++;
+                            }
+                        }
                     }
                 }
             }
+        }
+
+        // 디버그 로그 (60프레임마다)
+        if (Time.frameCount % 60 == 0)
+        {
+            float avgDepth = depthSampleCount > 0 ? sumDepth / depthSampleCount : 0f;
+            Debug.Log($"[IEExecutor] PointCloud Debug: maskPixels={maskPixelCount}, depthFiltered={depthFilteredCount}, validPoints={CurrentPointCount}, subFactor={_subSamplingFactor}");
+            Debug.Log($"[IEExecutor] Depth stats: min={minDepth:F3}m, max={maxDepth:F3}m, avg={avgDepth:F3}m, samples={depthSampleCount}");
         }
     }
 
@@ -487,6 +536,18 @@ public class IEExecutor : MonoBehaviour
     {
         float normX = (float)maskX / 160f;
         float normY = (float)maskY / 160f;
+        int pixelX = Mathf.RoundToInt((box.CenterX - box.Width/2f + normX * box.Width) + rgbW/2f);
+        int pixelY = Mathf.RoundToInt(rgbH/2f - (box.CenterY - box.Height/2f + normY * box.Height));
+        return new Vector2Int(Mathf.Clamp(pixelX, 0, rgbW - 1), Mathf.Clamp(pixelY, 0, rgbH - 1));
+    }
+
+    /// <summary>
+    /// 서브픽셀 좌표를 지원하는 마스크→RGB 변환 (보간용)
+    /// </summary>
+    private Vector2Int MapMaskToRGBPixelFloat(float maskX, float maskY, BoundingBox box, int rgbW, int rgbH)
+    {
+        float normX = maskX / 160f;
+        float normY = maskY / 160f;
         int pixelX = Mathf.RoundToInt((box.CenterX - box.Width/2f + normX * box.Width) + rgbW/2f);
         int pixelY = Mathf.RoundToInt(rgbH/2f - (box.CenterY - box.Height/2f + normY * box.Height));
         return new Vector2Int(Mathf.Clamp(pixelX, 0, rgbW - 1), Mathf.Clamp(pixelY, 0, rgbH - 1));

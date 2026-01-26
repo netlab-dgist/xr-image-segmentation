@@ -1367,6 +1367,11 @@ MonoBehaviour:
   _minSmoothTime: 0.03
   _maxSmoothTime: 0.2
   _sizeSmoothTime: 0.3
+  _depthManager: {fileID: 700560618}
+  _webCamManager: {fileID: 1675638408}
+  _captureRGBD: 1
+  _maxPoints: 8000
+  _samplingStep: 4
   _ieBoxer: {fileID: 568621722}
 --- !u!1 &832575517
 GameObject:
@@ -1721,6 +1726,57 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 1186697337}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1275853315
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1275853317}
+  - component: {fileID: 1275853316}
+  m_Layer: 0
+  m_Name: Point
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1275853316
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1275853315}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 77f7fc77e08e7a34c961657396581888, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _ieExecutor: {fileID: 787607880}
+  _pointMaterial: {fileID: 2100000, guid: d47b219874c9ae24aa807bf1980ed07c, type: 2}
+  _pointSize: 0.02
+  _sizeAttenuation: 1
+  _attenuationMinDist: 0.5
+  _attenuationMaxDist: 3
+  _showDebugInfo: 1
+--- !u!4 &1275853317
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1275853315}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 659.7568, y: 196.348, z: 307.89856}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1301121620
 GameObject:
@@ -2298,3 +2354,4 @@ SceneRoots:
   - {fileID: 1675638409}
   - {fileID: 287194505}
   - {fileID: 1998937516}
+  - {fileID: 1275853317}
