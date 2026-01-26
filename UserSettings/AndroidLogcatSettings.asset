@@ -6,8 +6,39 @@
         "processId": 0,
         "exited": false
     },
-    "m_SelectedPriority": 0,
-    "m_KnownProcessesForSerialization": [],
+    "m_SelectedPriority": 2,
+    "m_KnownProcessesForSerialization": [
+        {
+            "deviceId": "2G0YC5ZHBG000B",
+            "name": "com.oculus.vrshell",
+            "processId": 2572,
+            "exited": false
+        },
+        {
+            "deviceId": "2G0YC5ZHBG000B",
+            "name": "com.UnityTechnologies.com.unity.template.urpblank",
+            "processId": 12702,
+            "exited": true
+        },
+        {
+            "deviceId": "2G0YC5ZHBG000B",
+            "name": "com.UnityTechnologies.com.unity.template.urpblank",
+            "processId": 13432,
+            "exited": true
+        },
+        {
+            "deviceId": "2G0YC5ZHBG000B",
+            "name": "com.UnityTechnologies.com.unity.template.urpblank",
+            "processId": 8386,
+            "exited": true
+        },
+        {
+            "deviceId": "2G0YC5ZHBG000B",
+            "name": "com.UnityTechnologies.com.unity.template.urpblank",
+            "processId": 25671,
+            "exited": true
+        }
+    ],
     "m_Tags": {
         "m_Entries": [
             {
