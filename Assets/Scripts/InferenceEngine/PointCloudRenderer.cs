@@ -5,8 +5,13 @@ public class PointCloudRenderer : MonoBehaviour
 {
     [Header("Rendering Settings")]
     [SerializeField] private Material _pointCloudMaterial;
+    [SerializeField] private Material _meshSurfaceMaterial;  // Inspector에서 MeshSurfaceShader 머티리얼 설정
     [SerializeField] private float _pointSize = 0.01f;
-    [SerializeField] private float _meshConnectionDistance = 0.15f; // 15cm 이상 차이나면 연결 안함
+    [SerializeField] private float _meshConnectionDistance = 0.05f; // 5cm 이상 차이나면 연결 안함 (기둥 방지)
+
+    [Header("Debug")]
+    [SerializeField] private bool _createDebugCube = true;
+    private GameObject _debugCube;
 
     private Mesh _mesh;
     private MeshFilter _meshFilter;
@@ -100,35 +105,44 @@ public class PointCloudRenderer : MonoBehaviour
             }
         }
 
-        // 2. 삼각형 연결 (Quad Topology)
+        // 2. 삼각형 연결 - 개선된 알고리즘 (기둥 방지)
         for (int y = 0; y < height - 1; y++)
         {
             for (int x = 0; x < width - 1; x++)
             {
-                // 현재 픽셀과 오른쪽, 아래, 대각선 픽셀 인덱스
-                int idxTL = y * width + x;       // Top-Left
-                int idxTR = y * width + (x + 1); // Top-Right
-                int idxBL = (y + 1) * width + x; // Bottom-Left
-                int idxBR = (y + 1) * width + (x + 1); // Bottom-Right
+                int idxTL = y * width + x;
+                int idxTR = y * width + (x + 1);
+                int idxBL = (y + 1) * width + x;
+                int idxBR = (y + 1) * width + (x + 1);
 
-                // 4점이 모두 유효한지 확인
-                if (validGrid[idxTL] && validGrid[idxTR] && validGrid[idxBL] && validGrid[idxBR])
+                bool vTL = validGrid[idxTL];
+                bool vTR = validGrid[idxTR];
+                bool vBL = validGrid[idxBL];
+                bool vBR = validGrid[idxBR];
+
+                // 삼각형 1: TL-TR-BL (3점이 유효하고 모든 엣지가 연결 가능할 때)
+                if (vTL && vTR && vBL)
                 {
-                    // 깊이 차이가 너무 크면 연결 안 함 (경계면 처리)
-                    float d1 = Vector3.Distance(worldGrid[idxTL], worldGrid[idxBR]);
-                    float d2 = Vector3.Distance(worldGrid[idxTR], worldGrid[idxBL]);
-
-                    if (d1 < _meshConnectionDistance && d2 < _meshConnectionDistance)
+                    if (IsEdgeValid(worldGrid[idxTL], worldGrid[idxTR]) &&
+                        IsEdgeValid(worldGrid[idxTR], worldGrid[idxBL]) &&
+                        IsEdgeValid(worldGrid[idxBL], worldGrid[idxTL]))
                     {
-                        int vTL = gridToVertIndex[idxTL];
-                        int vTR = gridToVertIndex[idxTR];
-                        int vBL = gridToVertIndex[idxBL];
-                        int vBR = gridToVertIndex[idxBR];
+                        triangles.Add(gridToVertIndex[idxTL]);
+                        triangles.Add(gridToVertIndex[idxTR]);
+                        triangles.Add(gridToVertIndex[idxBL]);
+                    }
+                }
 
-                        // Triangle 1 (TL - TR - BL)
-                        triangles.Add(vTL); triangles.Add(vTR); triangles.Add(vBL);
-                        // Triangle 2 (TR - BR - BL)
-                        triangles.Add(vTR); triangles.Add(vBR); triangles.Add(vBL);
+                // 삼각형 2: TR-BR-BL (3점이 유효하고 모든 엣지가 연결 가능할 때)
+                if (vTR && vBR && vBL)
+                {
+                    if (IsEdgeValid(worldGrid[idxTR], worldGrid[idxBR]) &&
+                        IsEdgeValid(worldGrid[idxBR], worldGrid[idxBL]) &&
+                        IsEdgeValid(worldGrid[idxBL], worldGrid[idxTR]))
+                    {
+                        triangles.Add(gridToVertIndex[idxTR]);
+                        triangles.Add(gridToVertIndex[idxBR]);
+                        triangles.Add(gridToVertIndex[idxBL]);
                     }
                 }
             }
@@ -142,27 +156,33 @@ public class PointCloudRenderer : MonoBehaviour
         transform.position = centerPos;
         transform.rotation = Quaternion.identity;
 
-        // Vertex Color를 지원하는 shader 사용 (우선순위: Custom > Particles > Standard)
-        var surfShader = Shader.Find("Custom/MeshSurfaceShader");
-        if (surfShader == null) surfShader = Shader.Find("Particles/Standard Unlit");
-        if (surfShader == null) surfShader = Shader.Find("Unlit/Color");
-
-        if (surfShader != null)
+        // Material 설정: Inspector에서 설정된 것 사용, 없으면 fallback
+        if (_meshSurfaceMaterial != null)
         {
-            var mat = new Material(surfShader);
-
-            // Particles/Standard Unlit의 경우 Vertex Color 모드 설정
-            if (surfShader.name.Contains("Particles"))
-            {
-                mat.SetFloat("_ColorMode", 1); // Vertex Color
-            }
-
-            _meshRenderer.material = mat;
-            Debug.Log($"[PointCloudRenderer] Using shader: {surfShader.name}");
+            _meshRenderer.material = _meshSurfaceMaterial;
+            Debug.Log($"[PointCloudRenderer] Using assigned material: {_meshSurfaceMaterial.name}");
         }
         else
         {
-            Debug.LogError("[PointCloudRenderer] Failed to find any compatible shader!");
+            // Fallback: shader 찾아서 생성
+            var surfShader = Shader.Find("Custom/MeshSurfaceShader");
+            if (surfShader == null) surfShader = Shader.Find("Particles/Standard Unlit");
+            if (surfShader == null) surfShader = Shader.Find("Unlit/Color");
+
+            if (surfShader != null)
+            {
+                var mat = new Material(surfShader);
+                if (surfShader.name.Contains("Particles"))
+                {
+                    mat.SetFloat("_ColorMode", 1);
+                }
+                _meshRenderer.material = mat;
+                Debug.Log($"[PointCloudRenderer] Using fallback shader: {surfShader.name}");
+            }
+            else
+            {
+                Debug.LogError("[PointCloudRenderer] No material and no shader found!");
+            }
         }
 
         _mesh.RecalculateBounds();
@@ -182,6 +202,46 @@ public class PointCloudRenderer : MonoBehaviour
             float distToCamera = Vector3.Distance(Camera.main.transform.position, centerPos);
             Debug.Log($"[PointCloudRenderer] Distance to camera: {distToCamera:F2}m");
         }
+
+        // 렌더링 상태 디버그
+        Debug.Log($"[PointCloudRenderer] === Rendering Debug ===");
+        Debug.Log($"[PointCloudRenderer] GameObject active: {gameObject.activeSelf}, activeInHierarchy: {gameObject.activeInHierarchy}");
+        Debug.Log($"[PointCloudRenderer] Layer: {gameObject.layer} ({LayerMask.LayerToName(gameObject.layer)})");
+        Debug.Log($"[PointCloudRenderer] MeshRenderer enabled: {_meshRenderer.enabled}");
+        Debug.Log($"[PointCloudRenderer] MeshRenderer isVisible: {_meshRenderer.isVisible}");
+        Debug.Log($"[PointCloudRenderer] Material: {_meshRenderer.material?.name}, Shader: {_meshRenderer.material?.shader?.name}");
+        Debug.Log($"[PointCloudRenderer] MeshFilter mesh: {_meshFilter.mesh?.name}, vertexCount: {_meshFilter.mesh?.vertexCount}");
+        if (Camera.main != null)
+        {
+            Debug.Log($"[PointCloudRenderer] Camera cullingMask includes layer: {((Camera.main.cullingMask & (1 << gameObject.layer)) != 0)}");
+        }
+
+        // 디버그: 같은 위치에 테스트 큐브 생성
+        if (_createDebugCube)
+        {
+            CreateDebugCube(centerPos);
+        }
+    }
+
+    private void CreateDebugCube(Vector3 position)
+    {
+        if (_debugCube != null)
+        {
+            Destroy(_debugCube);
+        }
+
+        _debugCube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        _debugCube.name = "DebugCube_MeshPosition";
+        _debugCube.transform.position = position;
+        _debugCube.transform.localScale = Vector3.one * 0.1f; // 10cm 큐브
+
+        // 밝은 녹색 머티리얼 적용
+        var renderer = _debugCube.GetComponent<Renderer>();
+        var mat = new Material(Shader.Find("Unlit/Color"));
+        mat.color = Color.green;
+        renderer.material = mat;
+
+        Debug.Log($"[PointCloudRenderer] Debug cube created at {position}");
     }
 
     public void UpdateTransform(BoundingBox currentBox, Ray cameraRay)
@@ -194,5 +254,13 @@ public class PointCloudRenderer : MonoBehaviour
         if (_mesh != null) _mesh.Clear();
         IsMeshGenerated = false;
         if (gameObject != null) gameObject.SetActive(false);
+    }
+
+    /// <summary>
+    /// 두 점 사이의 거리가 연결 가능한 범위인지 확인 (기둥 방지)
+    /// </summary>
+    private bool IsEdgeValid(Vector3 a, Vector3 b)
+    {
+        return Vector3.Distance(a, b) < _meshConnectionDistance;
     }
 }

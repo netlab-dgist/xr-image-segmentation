@@ -10,26 +10,32 @@
     "m_KnownProcessesForSerialization": [
         {
             "deviceId": "2G0YC5ZHBG000B",
-            "name": "com.UnityTechnologies.com.unity.template.urpblank",
-            "processId": 15869,
-            "exited": true
-        },
-        {
-            "deviceId": "2G0YC5ZHBG000B",
-            "name": "com.oculus.os.clearactivity",
-            "processId": 18380,
-            "exited": true
+            "name": "com.oculus.vrshell",
+            "processId": 2572,
+            "exited": false
         },
         {
             "deviceId": "2G0YC5ZHBG000B",
             "name": "com.UnityTechnologies.com.unity.template.urpblank",
-            "processId": 987,
+            "processId": 12702,
             "exited": true
         },
         {
             "deviceId": "2G0YC5ZHBG000B",
             "name": "com.UnityTechnologies.com.unity.template.urpblank",
-            "processId": 26308,
+            "processId": 13432,
+            "exited": true
+        },
+        {
+            "deviceId": "2G0YC5ZHBG000B",
+            "name": "com.UnityTechnologies.com.unity.template.urpblank",
+            "processId": 8386,
+            "exited": true
+        },
+        {
+            "deviceId": "2G0YC5ZHBG000B",
+            "name": "com.UnityTechnologies.com.unity.template.urpblank",
+            "processId": 25671,
             "exited": true
         }
     ],

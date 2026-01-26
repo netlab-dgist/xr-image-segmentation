@@ -1,7 +1,6 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Reflection;
 using Unity.InferenceEngine;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -34,6 +33,11 @@ public class IEExecutor : MonoBehaviour
     [SerializeField] private PassthroughCameraSamples.WebCamTextureManager _webCamManager;
     [SerializeField] private int _maxPoints = 8000;
     [SerializeField] private PointCloudRenderer _pointCloudRenderer;
+    [SerializeField] private bool _flipDepthSampling = false;
+    [Tooltip("Points closer than this (meters) are ignored to prevent spikes.")]
+    [SerializeField] private float _minDepth = 0.3f; 
+    [Tooltip("Points further than this (meters) are ignored.")]
+    [SerializeField] private float _maxDepth = 5.0f;
 
     [Header("Optimization Settings")]
     [Range(1, 8)]
@@ -299,142 +303,182 @@ public class IEExecutor : MonoBehaviour
         int depthW = _cpuDepthTex.width;
         int depthH = _cpuDepthTex.height;
 
-        // EnvironmentDepthManager에서 frameDescriptors 가져오기 (internal이라 Reflection 사용)
-        float tanLeft, tanRight, tanTop, tanBottom;
-        Vector3 depthCamPos;
-        Quaternion depthCamRot;
-        Matrix4x4 trackingToWorld = Matrix4x4.identity;
+        // Coordinate Scale Correction
+        float scaleX = (float)rgbW / _inputSize.x;
+        float scaleY = (float)rgbH / _inputSize.y;
 
-        try
+        BoundingBox rgbBox = new BoundingBox
         {
-            var frameDescField = typeof(EnvironmentDepthManager).GetField("frameDescriptors", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
-            if (frameDescField == null)
-            {
-                Debug.LogError("[Snapshot] Cannot find frameDescriptors field! Using fallback.");
-                UseFallbackProjection(out tanLeft, out tanRight, out tanTop, out tanBottom, out depthCamPos, out depthCamRot);
-            }
-            else
-            {
-                var frameDescriptors = frameDescField.GetValue(_depthManager) as Array;
-                if (frameDescriptors == null || frameDescriptors.Length == 0)
-                {
-                    Debug.LogError("[Snapshot] frameDescriptors is null or empty! Using fallback.");
-                    UseFallbackProjection(out tanLeft, out tanRight, out tanTop, out tanBottom, out depthCamPos, out depthCamRot);
-                }
-                else
-                {
-                    object depthFrameDesc = frameDescriptors.GetValue(0);
-                    Type descType = depthFrameDesc.GetType();
+            CenterX = box.CenterX * scaleX,
+            CenterY = box.CenterY * scaleY,
+            Width = box.Width * scaleX,
+            Height = box.Height * scaleY
+        };
 
-                    Debug.Log($"[Snapshot] DepthFrameDesc type: {descType.FullName}");
-
-                    // internal 필드 접근 - NonPublic 플래그 사용
-                    var leftField = descType.GetField("fovLeftAngleTangent", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
-                    var rightField = descType.GetField("fovRightAngleTangent", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
-                    var topField = descType.GetField("fovTopAngleTangent", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
-                    var bottomField = descType.GetField("fovDownAngleTangent", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
-                    var posField = descType.GetField("createPoseLocation", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
-                    var rotField = descType.GetField("createPoseRotation", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
-
-                    if (leftField == null || rightField == null || topField == null || bottomField == null)
-                    {
-                        Debug.LogError($"[Snapshot] Cannot find FOV fields! Left:{leftField != null}, Right:{rightField != null}, Top:{topField != null}, Bottom:{bottomField != null}");
-                        // 모든 필드 이름 출력
-                        Debug.Log($"[Snapshot] Available fields in {descType.Name}:");
-                        foreach (var f in descType.GetFields(BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public))
-                        {
-                            Debug.Log($"  - {f.Name} ({f.FieldType.Name})");
-                        }
-                        UseFallbackProjection(out tanLeft, out tanRight, out tanTop, out tanBottom, out depthCamPos, out depthCamRot);
-                    }
-                    else
-                    {
-                        tanLeft = (float)leftField.GetValue(depthFrameDesc);
-                        tanRight = (float)rightField.GetValue(depthFrameDesc);
-                        tanTop = (float)topField.GetValue(depthFrameDesc);
-                        tanBottom = (float)bottomField.GetValue(depthFrameDesc);
-                        depthCamPos = posField != null ? (Vector3)posField.GetValue(depthFrameDesc) : Vector3.zero;
-                        depthCamRot = rotField != null ? (Quaternion)rotField.GetValue(depthFrameDesc) : Quaternion.identity;
-                    }
-                }
-            }
-
-            // Tracking space -> World 변환
-            var trackingSpaceMethod = typeof(EnvironmentDepthManager).GetMethod("GetTrackingSpaceWorldToLocalMatrix", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
-            if (trackingSpaceMethod != null)
-            {
-                Matrix4x4 worldToTracking = (Matrix4x4)trackingSpaceMethod.Invoke(_depthManager, null);
-                trackingToWorld = worldToTracking.inverse;
-            }
-        }
-        catch (Exception ex)
+        if (!_intrinsicsCached)
         {
-            Debug.LogError($"[Snapshot] Reflection failed: {ex.Message}\n{ex.StackTrace}");
-            UseFallbackProjection(out tanLeft, out tanRight, out tanTop, out tanBottom, out depthCamPos, out depthCamRot);
+            _cachedIntrinsics = PassthroughCameraSamples.PassthroughCameraUtils.GetCameraIntrinsics(PassthroughCameraSamples.PassthroughCameraEye.Left);
+            _intrinsicsCached = true;
         }
 
-        Debug.Log($"[Snapshot] Depth FOV tangents: L={tanLeft:F3}, R={tanRight:F3}, T={tanTop:F3}, B={tanBottom:F3}");
-        Debug.Log($"[Snapshot] Depth Cam Pos: {depthCamPos}, Rot: {depthCamRot.eulerAngles}");
-        Debug.Log($"[Snapshot] RGB: {rgbW}x{rgbH}, Depth: {depthW}x{depthH}");
+        float fx = _cachedIntrinsics.FocalLength.x;
+        float fy = _cachedIntrinsics.FocalLength.y;
+        float cx = _cachedIntrinsics.PrincipalPoint.x;
+        float cy = _cachedIntrinsics.PrincipalPoint.y;
+        Vector2Int intrinsicRes = _cachedIntrinsics.Resolution;
+        var cameraPose = PassthroughCameraSamples.PassthroughCameraUtils.GetCameraPoseInWorld(PassthroughCameraSamples.PassthroughCameraEye.Left);
 
         int maskSize = 160 * 160;
         int maskOffset = targetIndex * maskSize;
-        int gridIndex = 0;
+        
+        // --- Pass 1: Raw Data Extraction to Local Grid ---
+        // 160x160 그리드를 임시 저장할 2D 배열 (Depth & Color)
+        int gridSize = 160;
+        float[,] tempDepth = new float[gridSize, gridSize];
+        Color32[,] tempColor = new Color32[gridSize, gridSize];
+        bool[,] tempValid = new bool[gridSize, gridSize];
 
-        for (int y = 0; y < 160; y += _samplingStep)
+        for (int y = 0; y < gridSize; y += _samplingStep)
         {
-            for (int x = 0; x < 160; x += _samplingStep)
+            for (int x = 0; x < gridSize; x += _samplingStep)
             {
-                float maskVal = _latestMaskWeights[maskOffset + (y * 160 + x)];
-
+                float maskVal = _latestMaskWeights[maskOffset + (y * gridSize + x)];
                 if (maskVal > _confidenceThreshold)
                 {
-                    // Mask -> RGB 픽셀 좌표
-                    Vector2Int rgbPixel = MapMaskToRGBPixel(x, y, box, rgbW, rgbH);
+                    Vector2Int rgbPixel = MapMaskToRGBPixel(x, y, rgbBox, rgbW, rgbH);
+                    
+                    // Depth Sampling
+                    float rgbU = (float)rgbPixel.x / rgbW;
+                    float rgbV = (float)rgbPixel.y / rgbH;
+                    int dx = Mathf.Clamp(Mathf.FloorToInt(rgbU * (depthW - 1)), 0, depthW - 1);
+                    int dy;
+                    if (_flipDepthSampling) dy = Mathf.Clamp(Mathf.FloorToInt((1.0f - rgbV) * (depthH - 1)), 0, depthH - 1);
+                    else dy = Mathf.Clamp(Mathf.FloorToInt(rgbV * (depthH - 1)), 0, depthH - 1);
+
+                    float d = Mathf.HalfToFloat(depthData[dy * depthW + dx]);
+
+                    // Color Sampling
                     int pixelIdx = rgbPixel.y * rgbW + rgbPixel.x;
-
-                    if (pixelIdx < 0 || pixelIdx >= _rgbPixelCache.Length) { gridIndex++; continue; }
-
-                    // RGB -> Depth UV (0~1)
-                    float u = (float)rgbPixel.x / rgbW;
-                    float v = (float)rgbPixel.y / rgbH;
-
-                    int dx = Mathf.FloorToInt(u * (depthW - 1));
-                    int dy = Mathf.FloorToInt(v * (depthH - 1));
-                    float depthMeters = Mathf.HalfToFloat(depthData[dy * depthW + dx]);
-
-                    if (depthMeters > 0.1f && depthMeters < 5.0f)
+                    if (pixelIdx >= 0 && pixelIdx < _rgbPixelCache.Length)
                     {
-                        // Depth UV를 사용해 카메라 로컬 방향 계산 (FOV tangent 기반)
-                        // UV (0,0) = 좌상단, (1,1) = 우하단
-                        // X: u=0 -> -tanLeft, u=1 -> tanRight
-                        // Y: v=0 -> tanTop, v=1 -> -tanBottom
-                        float dirX = Mathf.Lerp(-tanLeft, tanRight, u);
-                        float dirY = Mathf.Lerp(tanTop, -tanBottom, v);
-                        float dirZ = 1.0f;
-
-                        // 로컬 3D 좌표 (depth 카메라 공간)
-                        Vector3 localPoint = new Vector3(dirX, dirY, dirZ) * depthMeters;
-
-                        // Meta SDK 방식: scale(1,1,-1) 적용 후 rotation, translation
-                        Vector3 scaledLocal = new Vector3(localPoint.x, localPoint.y, -localPoint.z);
-                        Vector3 trackingPos = depthCamPos + depthCamRot * scaledLocal;
-
-                        // Tracking Space -> World Space
-                        Vector3 worldPos = trackingToWorld.MultiplyPoint3x4(trackingPos);
-
-                        worldGrid[gridIndex] = worldPos;
-                        colorGrid[gridIndex] = _rgbPixelCache[pixelIdx];
-                        validGrid[gridIndex] = true;
-                        centerPosSum += worldPos;
-                        validCount++;
+                        tempColor[x, y] = _rgbPixelCache[pixelIdx];
                     }
+
+                    // Apply Min/Max Depth Filter
+                    if (d > _minDepth && d < _maxDepth)
+                    {
+                        tempDepth[x, y] = d;
+                        tempValid[x, y] = true;
+                    }
+                }
+            }
+        }
+
+        // --- Pass 2: Hole Filling (Iterative Interpolation - STRICT MASK ONLY) ---
+        // 마스크 내부인데 Depth가 없는 경우만 채움 (배경으로 확산 방지)
+        // 반복 횟수를 64회로 대폭 늘려, 테두리에서 중앙까지 Depth가 전파되도록 함 (Inpainting)
+        for (int iter = 0; iter < 64; iter++)
+        {
+            bool changed = false; // 최적화: 더 이상 채워지는 게 없으면 조기 종료
+
+            for (int y = 1; y < gridSize - 1; y += _samplingStep)
+            {
+                for (int x = 1; x < gridSize - 1; x += _samplingStep)
+                {
+                    // 이미 유효하면 패스
+                    if (tempValid[x, y]) continue;
+
+                    // 마스크 값 확인: 마스크가 물체라고 한 곳인가?
+                    float maskVal = _latestMaskWeights[maskOffset + (y * gridSize + x)];
+                    if (maskVal <= _confidenceThreshold) continue; // 마스크 밖이면 절대 채우지 않음
+
+                    // 여기서부터는 "마스크는 있는데 Depth가 구멍난 곳"
+                    float sum = 0; int count = 0;
+                    if (tempValid[x + 1, y]) { sum += tempDepth[x + 1, y]; count++; }
+                    if (tempValid[x - 1, y]) { sum += tempDepth[x - 1, y]; count++; }
+                    if (tempValid[x, y + 1]) { sum += tempDepth[x, y + 1]; count++; }
+                    if (tempValid[x, y - 1]) { sum += tempDepth[x, y - 1]; count++; }
+
+                    if (count >= 1)
+                    {
+                        tempDepth[x, y] = sum / count;
+                        tempValid[x, y] = true;
+                        changed = true;
+                        
+                        // 색상 보간
+                        int r = 0, g = 0, b = 0, colorCount = 0;
+                        if (tempValid[x + 1, y]) { Color32 c = tempColor[x + 1, y]; r += c.r; g += c.g; b += c.b; colorCount++; }
+                        if (tempValid[x - 1, y]) { Color32 c = tempColor[x - 1, y]; r += c.r; g += c.g; b += c.b; colorCount++; }
+                        if (tempValid[x, y + 1]) { Color32 c = tempColor[x, y + 1]; r += c.r; g += c.g; b += c.b; colorCount++; }
+                        if (tempValid[x, y - 1]) { Color32 c = tempColor[x, y - 1]; r += c.r; g += c.g; b += c.b; colorCount++; }
+
+                        if (colorCount > 0)
+                            tempColor[x, y] = new Color32((byte)(r / colorCount), (byte)(g / colorCount), (byte)(b / colorCount), 255);
+                    }
+                }
+            }
+
+            if (!changed) break; // 더 이상 채울 구멍이 없으면 종료
+        }
+
+        // --- Pass 3: Smoothing (3x3 Blur) ---
+        // 표면을 부드럽게 만들기 위해 Depth Blur 적용
+        float[,] smoothedDepth = new float[gridSize, gridSize];
+        for (int y = 1; y < gridSize - 1; y += _samplingStep)
+        {
+            for (int x = 1; x < gridSize - 1; x += _samplingStep)
+            {
+                if (tempValid[x, y])
+                {
+                    float sum = tempDepth[x, y];
+                    int count = 1;
+                    
+                    // 3x3 kernel
+                    if (tempValid[x+1, y]) { sum += tempDepth[x+1, y]; count++; }
+                    if (tempValid[x-1, y]) { sum += tempDepth[x-1, y]; count++; }
+                    if (tempValid[x, y+1]) { sum += tempDepth[x, y+1]; count++; }
+                    if (tempValid[x, y-1]) { sum += tempDepth[x, y-1]; count++; }
+
+                    smoothedDepth[x, y] = sum / count;
+                }
+            }
+        }
+
+        // --- Pass 4: Generate World Mesh ---
+        int gridIndex = 0;
+        for (int y = 0; y < gridSize; y += _samplingStep)
+        {
+            for (int x = 0; x < gridSize; x += _samplingStep)
+            {
+                // Smoothing된 Depth 사용
+                if (tempValid[x, y])
+                {
+                    float d = smoothedDepth[x, y];
+                    if (d == 0) d = tempDepth[x, y]; // Fallback if smoothing skipped edge
+
+                    Vector2Int rgbPixel = MapMaskToRGBPixel(x, y, rgbBox, rgbW, rgbH);
+                    
+                    float scaledPixelX = (float)rgbPixel.x / rgbW * intrinsicRes.x;
+                    float scaledPixelY = (float)rgbPixel.y / rgbH * intrinsicRes.y;
+
+                    float localX = (scaledPixelX - cx) / fx * d;
+                    float localY = (scaledPixelY - cy) / fy * d;
+                    float localZ = d;
+
+                    Vector3 localPoint = new Vector3(localX, -localY, localZ);
+                    Vector3 worldPos = cameraPose.position + cameraPose.rotation * localPoint;
+
+                    worldGrid[gridIndex] = worldPos;
+                    colorGrid[gridIndex] = tempColor[x, y];
+                    validGrid[gridIndex] = true;
+                    centerPosSum += worldPos;
+                    validCount++;
                 }
                 gridIndex++;
             }
         }
 
-        Debug.Log($"[Snapshot] Valid points: {validCount} / {gridIndex}");
+        Debug.Log($"[Snapshot] Valid points: {validCount} (Smoothed & Filled)");
     }
 
     private int FindBestMatchIndexFromCache()
@@ -511,22 +555,6 @@ public class IEExecutor : MonoBehaviour
 
     private void CleanupResources() { _output0BoxCoords?.Dispose(); _output1LabelIds?.Dispose(); _output2Masks?.Dispose(); _output3MaskWeights?.Dispose(); _readbacksInitiated = false; }
 
-    private void UseFallbackProjection(out float tanLeft, out float tanRight, out float tanTop, out float tanBottom, out Vector3 depthCamPos, out Quaternion depthCamRot)
-    {
-        // Quest 3 Depth 센서 대략적인 FOV (약 90도 수평/수직)
-        // tan(45도) = 1.0
-        tanLeft = 1.0f;
-        tanRight = 1.0f;
-        tanTop = 1.0f;
-        tanBottom = 1.0f;
-
-        // Passthrough 카메라 Pose를 대신 사용
-        Pose camPose = PassthroughCameraSamples.PassthroughCameraUtils.GetCameraPoseInWorld(PassthroughCameraSamples.PassthroughCameraEye.Left);
-        depthCamPos = camPose.position;
-        depthCamRot = camPose.rotation;
-
-        Debug.LogWarning("[Snapshot] Using FALLBACK depth projection - results may be inaccurate!");
-    }
 
     private void UpdateSmoothBox(BoundingBox bestBox)
     {
@@ -556,6 +584,9 @@ public class IEExecutor : MonoBehaviour
         float normX = (float)maskX / 160f;
         float normY = (float)maskY / 160f;
 
+        // Reverting to the original logic which handles Y-axis correctly for Unity (Bottom-Left 0)
+        // box.CenterY is relative to the image center.
+        // If box.CenterY is positive (Down in UI), (H/2) - CenterY moves it DOWN in texture space (towards 0).
         float texCenterX = box.CenterX + (rgbW * 0.5f);
         float texCenterY = (rgbH * 0.5f) - box.CenterY;
 
@@ -563,6 +594,7 @@ public class IEExecutor : MonoBehaviour
         float boxTop = texCenterY + (box.Height * 0.5f);
 
         float pixelX = boxLeft + (normX * box.Width);
+        // Go DOWN from Top
         float pixelY = boxTop - (normY * box.Height);
 
         return new Vector2Int(Mathf.Clamp(Mathf.RoundToInt(pixelX), 0, rgbW - 1), Mathf.Clamp(Mathf.RoundToInt(pixelY), 0, rgbH - 1));
