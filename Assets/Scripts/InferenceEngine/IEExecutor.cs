@@ -659,6 +659,12 @@ public class IEExecutor : MonoBehaviour
             float passRate = maskPassCount > 0 ? (float)CurrentPointCount / maskPassCount * 100f : 0f;
             Debug.Log($"[IEExecutor] GPU PointCloud: mask passed={maskPassCount}, depth fail={depthFailCount}, final points={CurrentPointCount} ({passRate:F1}%)");
             Debug.Log($"[IEExecutor] BBox: center=({box.CenterX:F1}, {box.CenterY:F1}), size=({box.Width:F1}x{box.Height:F1})");
+
+            // 디버그: Intrinsics 및 해상도 정보
+            Debug.Log($"[IEExecutor] RGB size: {rgbW}x{rgbH}, Depth size: {depthRT.width}x{depthRT.height}");
+            Debug.Log($"[IEExecutor] Intrinsics - fx:{scaledIntrinsics.x:F1}, fy:{scaledIntrinsics.y:F1}, cx:{scaledIntrinsics.z:F1}, cy:{scaledIntrinsics.w:F1}");
+            Debug.Log($"[IEExecutor] Original intrinsics res: {_cachedIntrinsics.Resolution.x}x{_cachedIntrinsics.Resolution.y}");
+            Debug.Log($"[IEExecutor] Camera pos: {cameraPose.position}, rot euler: {cameraPose.rotation.eulerAngles}");
         }
     }
 
@@ -784,7 +790,8 @@ public class IEExecutor : MonoBehaviour
                             if (CurrentPointCount >= _maxPoints) break;
 
                             float subMaskX = x + sx * subStep;
-                            float subMaskY = y + sy * subStep;
+                            // [수정] flippedY를 사용하여 마스크 읽기와 위치 매핑을 일치시킴
+                            float subMaskY = flippedY + sy * subStep;
 
                             Vector2Int rgbPixel = MapMaskToRGBPixelFloat(subMaskX, subMaskY, box, rgbW, rgbH);
 
@@ -834,11 +841,17 @@ public class IEExecutor : MonoBehaviour
                                 }
                             }
 
+                            // [핵심 수정] Unity 텍스처 좌표계(bottom-left) -> Android Camera2 좌표계(top-left)
+                            // Meta SDK의 ScreenPointToRayInCamera와 동일한 방식 사용
+                            // 카메라 intrinsics(cy)는 Android 좌표계 기준이므로 rgbPixel.y도 Android로 변환 필요
+                            int androidY = rgbH - 1 - rgbPixel.y;
+
                             Vector3 dirInCamera = new Vector3(
                                 (rgbPixel.x - cx) / fx,
-                                (rgbPixel.y - cy) / fy,
+                                (androidY - cy) / fy,
                                 1f
                             );
+                            // GetCameraPoseInWorld에 180도 X축 회전이 포함되어 있어 좌표계가 자동 변환됨
                             Vector3 dirInWorld = cameraRot * dirInCamera.normalized;
                             Vector3 worldPos = cameraPos + dirInWorld * depthMeters;
 

@@ -31,7 +31,7 @@ Shader "Custom/PointCloud"
 
             #include "UnityCG.cginc"
 
-            StructuredBuffer<float3> _PositionBuffer;
+            StructuredBuffer<float4> _PositionBuffer;
             StructuredBuffer<uint> _ColorBuffer;
 
             float _PointSize;
@@ -66,7 +66,7 @@ Shader "Custom/PointCloud"
                 UNITY_INITIALIZE_OUTPUT(v2f, o);
                 UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(o);
 
-                float3 worldPos = _PositionBuffer[vertexID];
+                float3 worldPos = _PositionBuffer[vertexID].xyz;
 
                 o.pos = UnityWorldToClipPos(float4(worldPos, 1.0));
                 o.color = UnpackColor32(_ColorBuffer[vertexID]);

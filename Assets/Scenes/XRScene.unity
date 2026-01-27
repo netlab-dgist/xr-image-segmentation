@@ -1358,7 +1358,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   _inputSize: {x: 640, y: 640}
-  _backend: 512
+  _backend: 256
   _sentisModel: {fileID: 5022602860645237092, guid: f1c063a466db58649b6fc7b9aa20b30b, type: 3}
   _layersPerFrame: 25
   _confidenceThreshold: 0.5
@@ -1371,7 +1371,7 @@ MonoBehaviour:
   _depthManager: {fileID: 700560618}
   _webCamManager: {fileID: 1675638408}
   _captureRGBD: 1
-  _maxPoints: 8000
+  _maxPoints: 20000
   _samplingStep: 1
   _subSamplingFactor: 2
   _pointCloudConfidence: 0.3
@@ -1766,7 +1766,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   _ieExecutor: {fileID: 787607880}
   _pointMaterial: {fileID: 2100000, guid: d47b219874c9ae24aa807bf1980ed07c, type: 2}
-  _pointSize: 0.02
+  _pointSize: 0.08
   _sizeAttenuation: 1
   _attenuationMinDist: 0.5
   _attenuationMaxDist: 3
