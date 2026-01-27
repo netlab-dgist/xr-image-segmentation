@@ -1,5 +1,5 @@
 // Compute Shader for extracting PointCloud from Depth + YOLO Mask
-// Fixed version with proper Texture2DArray handling and Y-axis correction
+// Simplified version: Reverted to Simple Sampling to fix missing center issue
 
 #pragma kernel ExtractPointCloud
 #pragma kernel DebugMask
@@ -15,7 +15,7 @@ StructuredBuffer<uint> _RGBBuffer;        // RGB packed as uint (RGBA32)
 // Output Buffers
 RWStructuredBuffer<float4> _PositionBuffer;  // xyz, w=1 (valid)
 RWStructuredBuffer<uint> _ColorBuffer;       // RGBA packed
-RWStructuredBuffer<int> _CounterBuffer;      // [0]=pointCount, [1]=maskPassCount, [2]=uvFailCount, [3]=depthFailCount
+RWStructuredBuffer<int> _CounterBuffer;      // [0]=pointCount, [1]=maskPassCount, [2]=uvFailCount, [3]=minDepthFail, [4]=maxDepthFail
 
 // Uniforms - Camera Intrinsics & Pose (RGB Camera)
 float4 _CameraIntrinsics;     // fx, fy, cx, cy (in RGB resolution pixels)
@@ -38,143 +38,178 @@ float _MaxDepth;
 // Depth conversion params (from Meta SDK)
 float4 _DepthZBufferParams;   // x=invDepthFactor, y=depthOffset
 
-// Depth reprojection (for proper depth sampling)
-float4x4 _DepthReprojMatrix;  // World to Depth clip space
+// Depth reprojection matrix (Not used in simple mode, but kept for compatibility)
+float4x4 _DepthReprojMatrix;
 
-// For sub-sampling
-int _SubSampleFactor;
-
-// Helper: Convert mask coordinate to RGB pixel coordinate
-// This matches IEMasker's coordinate system exactly
+// Helper: Convert mask coordinate to RGB pixel coordinate using Normalized UV
 int2 MaskToRGBPixel(float maskX, float maskY, float4 bbox, int rgbW, int rgbH)
 {
-    float scaleYoloToRgb = (float)rgbW / 640.0;
+    // 1. Mask UV (0~1)
+    float u = maskX / 160.0;
+    float v = maskY / 160.0; // 0:Bottom, 1:Top from ComputeShader ID
 
-    // Normalize mask position [0, 1]
-    float normX = maskX / 160.0;
-    float normY = maskY / 160.0;
+    // 2. Map to Global Texture UV
+    // bbox values are in YOLO pixel space centered at 0 (-320 ~ 320)
+    // X: Left(-320) ~ Right(320). U: 0~1
+    // Y: Top(-320) ~ Bottom(320). V: 1~0 (Unity Texture V is Bottom-Up)
 
-    // BBox is in YOLO centered space (CenterX, CenterY in [-320, 320])
-    float posInYoloX = bbox.x - bbox.z * 0.5 + normX * bbox.z;
-    float posInYoloY = bbox.y - bbox.w * 0.5 + normY * bbox.w;
+    // Calculate Normalized BBox params (0.0 ~ 1.0 scale relative to image size)
+    float bboxCenterX_Norm = bbox.x / 640.0; // -0.5 ~ 0.5
+    float bboxCenterY_Norm = bbox.y / 640.0; // -0.5 ~ 0.5 (YOLO Y: Down is positive)
+    float bboxW_Norm = bbox.z / 640.0;
+    float bboxH_Norm = bbox.w / 640.0;
 
-    // [수정] C#과 동일하게 Y축 매핑 수정
-    // YOLO 상단(posInYoloY < 0) -> RGB 상단(pixelY 큼)
-    // Unity Texture coordinate: (0,0) is Bottom-Left
-    int pixelX = (int)(posInYoloX * scaleYoloToRgb + rgbW * 0.5);
-    int pixelY = (int)(rgbH * 0.5 - posInYoloY * scaleYoloToRgb);
+    // Calculate Texture U (Left to Right)
+    // Center - HalfWidth + u * Width
+    float texU = 0.5 + bboxCenterX_Norm - bboxW_Norm * 0.5 + u * bboxW_Norm;
+
+    // Calculate Texture V (Bottom to Top)
+    // Unity V is opposite to YOLO Y.
+    // YOLO Top(-0.5) maps to Unity Top(1.0)
+    // YOLO Bottom(0.5) maps to Unity Bottom(0.0)
+    // CenterY(YOLO) maps to 0.5 - CenterY(YOLO)
+    
+    // TexV Start (Mask Bottom v=0) -> YOLO Box Bottom -> Unity Low V
+    // TexV End (Mask Top v=1) -> YOLO Box Top -> Unity High V
+    
+    // Box Bottom in Unity V = 0.5 - (bboxCenterY + bboxH/2)
+    // Box Top in Unity V = 0.5 - (bboxCenterY - bboxH/2)
+    // Interpolate using v (0->1)
+    
+    float boxBottomV = 0.5 - (bboxCenterY_Norm + bboxH_Norm * 0.5);
+    float boxTopV = 0.5 - (bboxCenterY_Norm - bboxH_Norm * 0.5);
+    
+    float texV = boxBottomV + v * (boxTopV - boxBottomV);
+
+    // [보정] Manual Y-axis offset: Shift UP by 10%
+    texV += 0.1;
+
+    int pixelX = (int)(texU * (float)rgbW);
+    int pixelY = (int)(texV * (float)rgbH);
 
     return int2(clamp(pixelX, 0, rgbW - 1), clamp(pixelY, 0, rgbH - 1));
 }
 
-// [수정] 반복적 재투영을 통한 깊이 샘플링 (Parallax Correction)
-// RGB 픽셀 방향으로 Ray를 쏘아 올바른 Depth 값을 찾음
-float SampleDepthIterative(float3 rayOrigin, float3 rayDir)
+// Simple Depth Sampling (1:1 UV mapping)
+// Assumes RGB and Depth cameras have similar FOV and alignment
+float SampleDepthSimple(int2 rgbPixel, int rgbW, int rgbH)
 {
-    // 1. 초기 추정: 일정 거리(예: 1m) 또는 단순 샘플링 값
-    float currentDepth = 1.0; 
-    
-    // 단순 샘플링으로 초기값 잡기 (수렴 속도 향상)
-    // 하지만 UV 매칭이 안되므로 오히려 나쁠 수도 있음. 
-    // 여기서는 안전하게 1.0m에서 시작하거나, 이전 프레임 값을 쓸 수 없으니 고정값 사용.
+    // Map RGB pixel directly to Depth UV
+    float u = (float)rgbPixel.x / (float)rgbW;
+    float v = (float)rgbPixel.y / (float)rgbH;
 
-    // 2. 반복 보정 (3회 정도면 충분히 수렴)
-    for(int i = 0; i < 3; i++)
+    int dx = (int)(u * (float)(_DepthWidth - 1));
+    int dy = (int)(v * (float)(_DepthHeight - 1));
+
+    dx = clamp(dx, 0, _DepthWidth - 1);
+    dy = clamp(dy, 0, _DepthHeight - 1);
+
+    // Sample from slice 0 (left eye)
+    float rawDepth = _DepthTexture[int3(dx, dy, 0)];
+
+    // Convert to linear depth
+    float depthNdc = rawDepth * 2.0 - 1.0;
+    float linearDepth = _DepthZBufferParams.x / (depthNdc + _DepthZBufferParams.y);
+
+    return linearDepth;
+}
+
+// Hole Filling Depth Sampling
+// If center depth is invalid, search 3x3 neighborhood for a valid depth
+float SampleDepthFilled(int2 rgbPixel, int rgbW, int rgbH)
+{
+    // 1. Center sample
+    float d = SampleDepthSimple(rgbPixel, rgbW, rgbH);
+    if (d >= _MinDepth && d <= _MaxDepth) return d;
+
+    // 2. Neighbor search (Spiral or simple grid)
+    // 3x3 search (radius 1)
+    const int radius = 2; 
+    float sumDepth = 0.0;
+    float validCount = 0.0;
+
+    for (int y = -radius; y <= radius; y++)
     {
-        // 현재 추정된 깊이에서의 월드 좌표
-        float3 estimatedWorldPos = rayOrigin + rayDir * currentDepth;
+        for (int x = -radius; x <= radius; x++)
+        {
+            if (x == 0 && y == 0) continue;
 
-        // 월드 좌표 -> Depth Clip Space 재투영
-        float4 depthClip = mul(_DepthReprojMatrix, float4(estimatedWorldPos, 1.0));
-        
-        // NDC 변환
-        float2 depthNDC = depthClip.xy / depthClip.w;
-        
-        // UV 변환 [0,1]
-        float2 depthUV = depthNDC * 0.5 + 0.5;
-
-        // 범위 체크
-        if (depthUV.x < 0.0 || depthUV.x > 1.0 || depthUV.y < 0.0 || depthUV.y > 1.0)
-            return -1.0; // 유효하지 않은 영역
-
-        // Depth Texture 샘플링
-        int dx = (int)(depthUV.x * (_DepthWidth - 1));
-        int dy = (int)(depthUV.y * (_DepthHeight - 1));
-        float rawDepth = _DepthTexture[int3(dx, dy, 0)];
-
-        // Linear Depth 변환
-        float depthNdc = rawDepth * 2.0 - 1.0;
-        float sampledDepth = _DepthZBufferParams.x / (depthNdc + _DepthZBufferParams.y);
-
-        // 깊이 값 갱신
-        currentDepth = sampledDepth;
+            int2 neighbor = rgbPixel + int2(x, y);
+            float nd = SampleDepthSimple(neighbor, rgbW, rgbH);
+            
+            if (nd >= _MinDepth && nd <= _MaxDepth)
+            {
+                sumDepth += nd;
+                validCount += 1.0;
+            }
+        }
     }
 
-    return currentDepth;
+    if (validCount > 0.0)
+    {
+        return sumDepth / validCount; // Average of valid neighbors
+    }
+
+    return -1.0; // Failed to fill
 }
 
 [numthreads(8, 8, 1)]
 void ExtractPointCloud(uint3 id : SV_DispatchThreadID)
 {
-    // Boundary check for 160x160 mask
     if (id.x >= 160 || id.y >= 160) return;
 
-    // 1. Sample mask value
-    // IMPORTANT: Match IEMasker's Y-flip: posY = maskH - y - 1
+    // Row-major indexing (matching C# data layout)
     int flippedY = 159 - (int)id.y;
-    int maskIdx = flippedY * 160 + id.x;
+    int maskIdx = flippedY * 160 + (int)id.x;
     float maskVal = _MaskBuffer[maskIdx];
 
-    // 2. Mask confidence check
     if (maskVal < _ConfidenceThreshold)
         return;
 
-    // Count mask pixels that passed
     InterlockedAdd(_CounterBuffer[1], 1);
 
-    // 3. Map mask coordinate to RGB pixel
-    // Use original (non-flipped) mask coordinates for spatial mapping
-    float maskX = (float)id.x;
-    float maskY = (float)id.y;
+    int2 rgbPixel = MaskToRGBPixel((float)id.x, (float)id.y, _BBoxParams, _RGBWidth, _RGBHeight);
 
-    int2 rgbPixel = MaskToRGBPixel(maskX, maskY, _BBoxParams, _RGBWidth, _RGBHeight);
+    // [수정] Hole Filling 적용
+    float depthMeters = SampleDepthFilled(rgbPixel, _RGBWidth, _RGBHeight);
 
-    // 4. Calculate Ray Direction in World Space FIRST
+    // [보정] Depth Offset: 포인트가 너무 앞에 나오므로 뒤로 0.1m 밈
+    depthMeters += 0.1;
+
+    if (depthMeters < _MinDepth)
+    {
+        InterlockedAdd(_CounterBuffer[3], 1);
+        return;
+    }
+    if (depthMeters > _MaxDepth)
+    {
+        InterlockedAdd(_CounterBuffer[4], 1);
+        return;
+    }
+
+    // Compute World Position
     float fx = _CameraIntrinsics.x;
     float fy = _CameraIntrinsics.y;
     float cx = _CameraIntrinsics.z;
     float cy = _CameraIntrinsics.w;
 
     float3 dirInCamera = float3(
-        (rgbPixel.x - cx) / fx,
-        (rgbPixel.y - cy) / fy,
+        ((float)rgbPixel.x - cx) / fx,
+        ((float)rgbPixel.y - cy) / fy,
         1.0
     );
     dirInCamera = normalize(dirInCamera);
     float3 dirInWorld = mul((float3x3)_CameraRotation, dirInCamera);
 
-    // 5. Sample Depth with Parallax Correction
-    float depthMeters = SampleDepthIterative(_CameraPosition.xyz, dirInWorld);
-
-    // 6. Depth range filter
-    // If depth sampling failed (returned -1) or out of range
-    if (depthMeters < _MinDepth || depthMeters > _MaxDepth)
-    {
-        InterlockedAdd(_CounterBuffer[3], 1);
-        return;
-    }
-
-    // 7. Compute final world position
     float3 worldPos = _CameraPosition.xyz + dirInWorld * depthMeters;
 
-    // 8. Atomic append to output buffer
     int idx;
     InterlockedAdd(_CounterBuffer[0], 1, idx);
     if (idx >= _MaxPoints) return;
 
     _PositionBuffer[idx] = float4(worldPos, 1.0);
 
-    // 9. Sample RGB color
+    // [수정] 디버그 색상 제거하고 원래 RGB 색상 사용
     int rgbIdx = rgbPixel.y * _RGBWidth + rgbPixel.x;
     if (rgbIdx >= 0 && rgbIdx < _RGBWidth * _RGBHeight)
     {
@@ -186,14 +221,13 @@ void ExtractPointCloud(uint3 id : SV_DispatchThreadID)
     }
 }
 
-// Debug kernel to visualize which mask pixels are being processed
 [numthreads(8, 8, 1)]
 void DebugMask(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= 160 || id.y >= 160) return;
 
     int flippedY = 159 - (int)id.y;
-    int maskIdx = flippedY * 160 + id.x;
+    int maskIdx = flippedY * 160 + (int)id.x;
     float maskVal = _MaskBuffer[maskIdx];
 
     if (maskVal > _ConfidenceThreshold)
@@ -201,31 +235,19 @@ void DebugMask(uint3 id : SV_DispatchThreadID)
         InterlockedAdd(_CounterBuffer[1], 1);
 
         int2 rgbPixel = MaskToRGBPixel((float)id.x, (float)id.y, _BBoxParams, _RGBWidth, _RGBHeight);
-        
-        // Calculate Ray Direction for Iterative Sampling
-        float fx = _CameraIntrinsics.x;
-        float fy = _CameraIntrinsics.y;
-        float cx = _CameraIntrinsics.z;
-        float cy = _CameraIntrinsics.w;
+        float depthMeters = SampleDepthSimple(rgbPixel, _RGBWidth, _RGBHeight);
 
-        float3 dirInCamera = float3(
-            (rgbPixel.x - cx) / fx,
-            (rgbPixel.y - cy) / fy,
-            1.0
-        );
-        dirInCamera = normalize(dirInCamera);
-        float3 dirInWorld = mul((float3x3)_CameraRotation, dirInCamera);
-
-        // Use Iterative Sampling
-        float depthMeters = SampleDepthIterative(_CameraPosition.xyz, dirInWorld);
-
-        if (depthMeters >= _MinDepth && depthMeters <= _MaxDepth)
-        {
-            InterlockedAdd(_CounterBuffer[0], 1);
-        }
-        else
+        // [수정] 디버그 마스크에서도 필터링 대신 카운팅만 수행 (모두 유효한 것으로 처리)
+        if (depthMeters < _MinDepth)
         {
             InterlockedAdd(_CounterBuffer[3], 1);
         }
+        else if (depthMeters > _MaxDepth)
+        {
+            InterlockedAdd(_CounterBuffer[4], 1);
+        }
+        
+        // 무조건 포인트 생성 카운트 증가
+        InterlockedAdd(_CounterBuffer[0], 1);
     }
 }

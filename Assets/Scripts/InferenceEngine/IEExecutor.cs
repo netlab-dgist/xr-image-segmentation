@@ -29,9 +29,10 @@ public class IEExecutor : MonoBehaviour
     [Header("Natural Tracking Settings")]
     [SerializeField] private int _maxLostFrames = 15;
     [SerializeField] private float _minIoUThreshold = 0.3f;
-    [SerializeField] private float _minSmoothTime = 0.03f;
-    [SerializeField] private float _maxSmoothTime = 0.2f;
-    [SerializeField] private float _sizeSmoothTime = 0.3f;
+    // [수정] 스무딩 타임 증가 (덜 떨리게)
+    [SerializeField] private float _minSmoothTime = 0.1f; // 0.03 -> 0.1
+    [SerializeField] private float _maxSmoothTime = 0.5f; // 0.2 -> 0.5
+    [SerializeField] private float _sizeSmoothTime = 0.5f; // 0.3 -> 0.5
 
     [Header("RGB-D & Depth Settings")]
     [SerializeField] private EnvironmentDepthManager _depthManager;
@@ -137,6 +138,13 @@ public class IEExecutor : MonoBehaviour
 
     private void Awake()
     {
+        // [안전장치] 인스펙터 값이 너무 작으면 강제로 늘림
+        if (_maxPoints < 102400)
+        {
+            Debug.LogWarning($"[IEExecutor] _maxPoints ({_maxPoints}) is too small. Forcing to 102400.");
+            _maxPoints = 102400;
+        }
+
         PointBuffer = new RGBDPoint[_maxPoints];
     }
 
@@ -149,8 +157,15 @@ public class IEExecutor : MonoBehaviour
         LoadModel();
     }
 
+    private float _lastUpdateTime;
+    private const float _updateInterval = 0.05f; // 20 FPS 제한
+
     private void Update()
     {
+        // [수정] 너무 잦은 업데이트 방지 (Jitter 감소)
+        if (Time.time - _lastUpdateTime < _updateInterval) return;
+        _lastUpdateTime = Time.time;
+
         UpdateInference();
         PrepareDepthData();
         PrepareRgbData();
@@ -320,8 +335,8 @@ public class IEExecutor : MonoBehaviour
         _rgbBuffer = new ComputeBuffer(_maxPoints, sizeof(uint));
         _positionBuffer = new ComputeBuffer(_maxPoints, sizeof(float) * 4);
         _colorBuffer = new ComputeBuffer(_maxPoints, sizeof(uint));
-        // 4 counters: pointCount, maskPassCount, uvFailCount, depthFailCount
-        _counterBuffer = new ComputeBuffer(4, sizeof(int));
+        // 5 counters: pointCount, maskPassCount, uvFailCount, minDepthFail, maxDepthFail
+        _counterBuffer = new ComputeBuffer(5, sizeof(int));
         _computeBuffersInitialized = true;
 
         Debug.Log("[IEExecutor] Compute buffers initialized for GPU PointCloud extraction.");
@@ -429,12 +444,14 @@ public class IEExecutor : MonoBehaviour
     {
         List<BoundingBox> currentFrameBoxes;
 
+        // [복구] 트래킹 모드일 때만 선택된 객체 추적 및 시각화
         if (_isTracking && _lockedTargetBox.HasValue)
         {
             currentFrameBoxes = ParseBoxesWithoutDraw(_output0BoxCoords, _output1LabelIds, _inputSize.x, _inputSize.y);
             _currentFrameBoxes.Clear();
             _currentFrameBoxes.AddRange(currentFrameBoxes);
 
+            // 박스 그리기 비활성화 (타겟만 그릴 것이므로)
             _ieBoxer.HideAllBoxes();
 
             float bestScore = 0f;
@@ -442,6 +459,7 @@ public class IEExecutor : MonoBehaviour
             BoundingBox bestBox = default;
             Vector2 prevCenter = new Vector2(_lockedTargetBox.Value.CenterX, _lockedTargetBox.Value.CenterY);
 
+            // IoU 기반으로 가장 일치하는 객체 찾기
             for (int i = 0; i < currentFrameBoxes.Count; i++)
             {
                 BoundingBox currBox = currentFrameBoxes[i];
@@ -465,6 +483,11 @@ public class IEExecutor : MonoBehaviour
             {
                 _consecutiveLostFrames = 0;
                 UpdateSmoothBox(bestBox);
+                
+                // 타겟 박스만 그리기
+                _ieBoxer.DrawSingleBox(_lockedTargetBox.Value);
+                
+                // 마스크 및 포인트 클라우드 생성
                 _ieMasker.DrawSingleMask(bestIndex, bestBox, _output3MaskWeights, _inputSize.x, _inputSize.y);
 
                 if (_captureRGBD)
@@ -472,7 +495,7 @@ public class IEExecutor : MonoBehaviour
                     if (_computeBuffersInitialized)
                         ExtractPointCloudGPU(bestIndex, bestBox);
                     else
-                        ExtractRGBDData(bestIndex, bestBox);  // 폴백
+                        ExtractRGBDData(bestIndex, bestBox);
                 }
             }
             else
@@ -481,6 +504,7 @@ public class IEExecutor : MonoBehaviour
                 if (_consecutiveLostFrames <= _maxLostFrames)
                 {
                     PredictBoxMovement();
+                    _ieBoxer.DrawSingleBox(_lockedTargetBox.Value); // 예측된 위치에 박스 표시
                     _ieMasker.KeepCurrentMask();
                 }
                 else
@@ -491,9 +515,11 @@ public class IEExecutor : MonoBehaviour
         }
         else
         {
+            // [대기 모드] 모든 후보 박스 그리기, 포인트 클라우드 생성 안 함
             currentFrameBoxes = _ieBoxer.DrawBoxes(_output0BoxCoords, _output1LabelIds, _inputSize.x, _inputSize.y);
             _currentFrameBoxes.Clear();
             _currentFrameBoxes.AddRange(currentFrameBoxes);
+            
             _ieMasker.ClearAllMasks();
             CurrentPointCount = 0;
         }
@@ -589,79 +615,81 @@ public class IEExecutor : MonoBehaviour
         }
         _maskBuffer.SetData(maskData);
 
-        // 5. RGB 데이터 업로드
-        if (_rgbDataReady && _rgbPixelCache != null && _rgbPixelCache.Length > 0)
-        {
-            uint[] rgbPacked = new uint[_rgbPixelCache.Length];
-            for (int i = 0; i < _rgbPixelCache.Length; i++)
-            {
-                Color32 c = _rgbPixelCache[i];
-                rgbPacked[i] = ((uint)c.r) | ((uint)c.g << 8) | ((uint)c.b << 16) | ((uint)c.a << 24);
-            }
-            _rgbBuffer.SetData(rgbPacked);
-        }
-
-        // 6. Counter 리셋 (4개 모두 0으로)
-        for (int i = 0; i < 4; i++) _counterData[i] = 0;
-        _counterBuffer.SetData(_counterData);
-
-        // 7. Compute Shader 유니폼 설정
-        _pointCloudShader.SetVector("_CameraIntrinsics", scaledIntrinsics);
-        _pointCloudShader.SetVector("_CameraPosition", new Vector4(cameraPose.position.x, cameraPose.position.y, cameraPose.position.z, 1));
-        _pointCloudShader.SetMatrix("_CameraRotation", Matrix4x4.Rotate(cameraPose.rotation));
-        _pointCloudShader.SetVector("_BBoxParams", new Vector4(box.CenterX, box.CenterY, box.Width, box.Height));
-        _pointCloudShader.SetVector("_DepthZBufferParams", zParams);
-        _pointCloudShader.SetFloat("_ConfidenceThreshold", _pointCloudConfidence);
-        _pointCloudShader.SetInt("_RGBWidth", rgbW);
-        _pointCloudShader.SetInt("_RGBHeight", rgbH);
-        _pointCloudShader.SetInt("_DepthWidth", depthRT.width);
-        _pointCloudShader.SetInt("_DepthHeight", depthRT.height);
-        _pointCloudShader.SetInt("_MaxPoints", _maxPoints);
-        _pointCloudShader.SetFloat("_MinDepth", _minDepthRange);
-        _pointCloudShader.SetFloat("_MaxDepth", _maxDepthRange);
-
-        // 8. 버퍼 바인딩
-        _pointCloudShader.SetTexture(_kernelId, "_DepthTexture", depthRT);
-        _pointCloudShader.SetBuffer(_kernelId, "_MaskBuffer", _maskBuffer);
-        _pointCloudShader.SetBuffer(_kernelId, "_RGBBuffer", _rgbBuffer);
-        _pointCloudShader.SetBuffer(_kernelId, "_PositionBuffer", _positionBuffer);
-        _pointCloudShader.SetBuffer(_kernelId, "_ColorBuffer", _colorBuffer);
-        _pointCloudShader.SetBuffer(_kernelId, "_CounterBuffer", _counterBuffer);
-
-        // 9. Dispatch (160x160 / 8x8 = 20x20 thread groups)
-        _pointCloudShader.Dispatch(_kernelId, 20, 20, 1);
-
-        // 10. 결과 읽기 (동기)
-        _counterBuffer.GetData(_counterData);
-        CurrentPointCount = Mathf.Min(_counterData[0], _maxPoints);
-        int maskPassCount = _counterData[1];
-        int depthFailCount = _counterData[3];
-
-        // 11. PointBuffer로 복사
-        if (CurrentPointCount > 0)
-        {
-            Vector4[] positions = new Vector4[CurrentPointCount];
-            uint[] colors = new uint[CurrentPointCount];
-            _positionBuffer.GetData(positions, 0, 0, CurrentPointCount);
-            _colorBuffer.GetData(colors, 0, 0, CurrentPointCount);
-
-            for (int i = 0; i < CurrentPointCount; i++)
-            {
-                PointBuffer[i].worldPos = new Vector3(positions[i].x, positions[i].y, positions[i].z);
-                uint c = colors[i];
-                PointBuffer[i].color = new Color32((byte)(c & 0xFF), (byte)((c >> 8) & 0xFF), (byte)((c >> 16) & 0xFF), (byte)((c >> 24) & 0xFF));
-            }
-        }
-
-        // 디버그 로그 (30프레임마다)
-        if (Time.frameCount % 30 == 0)
-        {
-            float passRate = maskPassCount > 0 ? (float)CurrentPointCount / maskPassCount * 100f : 0f;
-            Debug.Log($"[IEExecutor] GPU PointCloud: mask passed={maskPassCount}, depth fail={depthFailCount}, final points={CurrentPointCount} ({passRate:F1}%)");
-            Debug.Log($"[IEExecutor] BBox: center=({box.CenterX:F1}, {box.CenterY:F1}), size=({box.Width:F1}x{box.Height:F1})");
-        }
-    }
-
+                    // 5. RGB 데이터 업로드
+                    if (_rgbDataReady && _rgbPixelCache != null && _rgbPixelCache.Length > 0)
+                    {
+                        uint[] rgbPacked = new uint[_rgbPixelCache.Length];
+                        for (int i = 0; i < _rgbPixelCache.Length; i++)
+                        {
+                            Color32 c = _rgbPixelCache[i];
+                            rgbPacked[i] = ((uint)c.r) | ((uint)c.g << 8) | ((uint)c.b << 16) | ((uint)c.a << 24);
+                        }
+                        _rgbBuffer.SetData(rgbPacked);
+                    }
+        
+                    // 6. Counter 리셋 (5개 모두 0으로)
+                    int[] counterReset = new int[5];
+                    _counterBuffer.SetData(counterReset);
+        
+                    // 7. Compute Shader 유니폼 설정
+                    _pointCloudShader.SetVector("_CameraIntrinsics", scaledIntrinsics);
+                    _pointCloudShader.SetVector("_CameraPosition", new Vector4(cameraPose.position.x, cameraPose.position.y, cameraPose.position.z, 1));
+                    _pointCloudShader.SetMatrix("_CameraRotation", Matrix4x4.Rotate(cameraPose.rotation));
+                    _pointCloudShader.SetVector("_BBoxParams", new Vector4(box.CenterX, box.CenterY, box.Width, box.Height));
+                    _pointCloudShader.SetVector("_DepthZBufferParams", zParams);
+                    _pointCloudShader.SetFloat("_ConfidenceThreshold", _pointCloudConfidence);
+                    _pointCloudShader.SetInt("_RGBWidth", rgbW);
+                    _pointCloudShader.SetInt("_RGBHeight", rgbH);
+                    _pointCloudShader.SetInt("_DepthWidth", depthRT.width);
+                    _pointCloudShader.SetInt("_DepthHeight", depthRT.height);
+                    _pointCloudShader.SetInt("_MaxPoints", _maxPoints);
+                    _pointCloudShader.SetFloat("_MinDepth", _minDepthRange);
+                    _pointCloudShader.SetFloat("_MaxDepth", _maxDepthRange);
+        
+                    // 8. 버퍼 바인딩
+                    _pointCloudShader.SetTexture(_kernelId, "_DepthTexture", depthRT);
+                    _pointCloudShader.SetBuffer(_kernelId, "_MaskBuffer", _maskBuffer);
+                    _pointCloudShader.SetBuffer(_kernelId, "_RGBBuffer", _rgbBuffer);
+                    _pointCloudShader.SetBuffer(_kernelId, "_PositionBuffer", _positionBuffer);
+                    _pointCloudShader.SetBuffer(_kernelId, "_ColorBuffer", _colorBuffer);
+                    _pointCloudShader.SetBuffer(_kernelId, "_CounterBuffer", _counterBuffer);
+        
+                    // 9. Dispatch (160x160 / 8x8 = 20x20 thread groups)
+                    _pointCloudShader.Dispatch(_kernelId, 20, 20, 1);
+        
+                    // 10. 결과 읽기 (동기)
+                    int[] counterResult = new int[5];
+                    _counterBuffer.GetData(counterResult);
+                    CurrentPointCount = Mathf.Min(counterResult[0], _maxPoints);
+                    int maskPassCount = counterResult[1];
+                    int minDepthFail = counterResult[3];
+                    int maxDepthFail = counterResult[4];
+        
+                    // 11. PointBuffer로 복사
+                    if (CurrentPointCount > 0)
+                    {
+                        Vector4[] positions = new Vector4[CurrentPointCount];
+                        uint[] colors = new uint[CurrentPointCount];
+                        _positionBuffer.GetData(positions, 0, 0, CurrentPointCount);
+                        _colorBuffer.GetData(colors, 0, 0, CurrentPointCount);
+        
+                        for (int i = 0; i < CurrentPointCount; i++)
+                        {
+                            PointBuffer[i].worldPos = new Vector3(positions[i].x, positions[i].y, positions[i].z);
+                            uint c = colors[i];
+                            PointBuffer[i].color = new Color32((byte)(c & 0xFF), (byte)((c >> 8) & 0xFF), (byte)((c >> 16) & 0xFF), (byte)((c >> 24) & 0xFF));
+                        }
+                    }
+        
+                    // 디버그 로그 (30프레임마다)
+                    if (Time.frameCount % 30 == 0)
+                    {
+                        float passRate = maskPassCount > 0 ? (float)CurrentPointCount / maskPassCount * 100f : 0f;
+                        Debug.Log($"[IEExecutor] GPU PointCloud: mask pass={maskPassCount}, final={CurrentPointCount} ({passRate:F1}%)");
+                        Debug.Log($"[IEExecutor] Fails: UV={counterResult[2]}, MinD={minDepthFail}, MaxD={maxDepthFail}");
+                        Debug.Log($"[IEExecutor] BBox: center=({box.CenterX:F1}, {box.CenterY:F1}), size=({box.Width:F1}x{box.Height:F1})");
+                    }
+                }
     /// <summary>
     /// [레거시] CPU 기반 RGB 데이터 사용 - GPU 방식 실패시 폴백용
     /// IEMasker와 동일한 Y축 처리 방식 사용
@@ -725,7 +753,7 @@ public class IEExecutor : MonoBehaviour
             {
                 for (int x = 0; x < 160; x += _samplingStep)
                 {
-                    // IEMasker와 동일한 Y축 뒤집기
+                    // [수정] Y축 뒤집기 복구
                     int flippedY = 159 - y;
                     float maskVal = _output3MaskWeights[targetIndex, flippedY, x];
                     if (maskVal > _pointCloudConfidence)
@@ -768,7 +796,7 @@ public class IEExecutor : MonoBehaviour
             {
                 if (CurrentPointCount >= _maxPoints) break;
 
-                // IEMasker와 동일한 Y축 뒤집기
+                // [수정] Y축 뒤집기 복구
                 int flippedY = 159 - y;
                 float maskVal = _output3MaskWeights[targetIndex, flippedY, x];
 
@@ -818,20 +846,13 @@ public class IEExecutor : MonoBehaviour
                                 depthSampleCount++;
                             }
 
+                            // [복구] 유효하지 않은 깊이 값은 버림 (CPU에서는 Hole Filling 생략)
                             bool validDepth = depthMeters > _minDepthRange && depthMeters < _maxDepthRange;
 
                             if (!validDepth)
                             {
-                                if (_includeInvalidDepth && avgDepthForFallback > _minDepthRange)
-                                {
-                                    depthMeters = avgDepthForFallback;
-                                    if (sx == 0 && sy == 0) fallbackUsedCount++;
-                                }
-                                else
-                                {
-                                    if (sx == 0 && sy == 0) depthFilteredCount++;
-                                    continue;
-                                }
+                                if (sx == 0 && sy == 0) depthFilteredCount++;
+                                continue;
                             }
 
                             Vector3 dirInCamera = new Vector3(
@@ -863,20 +884,25 @@ public class IEExecutor : MonoBehaviour
 
     private Vector2Int MapMaskToRGBPixel(int maskX, int maskY, BoundingBox box, int rgbW, int rgbH)
     {
-        // BBox는 640x640 YOLO 공간 기준, RGB는 1280x1280이므로 스케일 변환 필요
-        float scaleYoloToRgb = rgbW / 640f;
+        float u = maskX / 160f;
+        float v = maskY / 160f;
 
-        float normX = (float)maskX / 160f;
-        float normY = (float)maskY / 160f;
+        float bboxCenterX_Norm = box.CenterX / 640f;
+        float bboxCenterY_Norm = box.CenterY / 640f;
+        float bboxW_Norm = box.Width / 640f;
+        float bboxH_Norm = box.Height / 640f;
 
-        // YOLO 공간에서의 위치 계산 (CenterY: Top-Left origin 기준 오프셋, 아래로 갈수록 증가)
-        float posInYoloX = box.CenterX - box.Width / 2f + normX * box.Width;
-        float posInYoloY = box.CenterY - box.Height / 2f + normY * box.Height;
+        float texU = 0.5f + bboxCenterX_Norm - bboxW_Norm * 0.5f + u * bboxW_Norm;
 
-        // [수정] Y축 매핑: Unity Texture는 Bottom-Left origin.
-        // YOLO Y 증가(아래로) -> Texture Y 감소(아래로)
-        int pixelX = Mathf.RoundToInt(posInYoloX * scaleYoloToRgb + rgbW / 2f);
-        int pixelY = Mathf.RoundToInt(rgbH / 2f - posInYoloY * scaleYoloToRgb);
+        float boxBottomV = 0.5f - (bboxCenterY_Norm + bboxH_Norm * 0.5f);
+        float boxTopV = 0.5f - (bboxCenterY_Norm - bboxH_Norm * 0.5f);
+        float texV = boxBottomV + v * (boxTopV - boxBottomV);
+
+        // [보정] 위로 10% 올리기
+        texV += 0.1f;
+
+        int pixelX = Mathf.RoundToInt(texU * rgbW);
+        int pixelY = Mathf.RoundToInt(texV * rgbH);
 
         return new Vector2Int(Mathf.Clamp(pixelX, 0, rgbW - 1), Mathf.Clamp(pixelY, 0, rgbH - 1));
     }
@@ -886,17 +912,25 @@ public class IEExecutor : MonoBehaviour
     /// </summary>
     private Vector2Int MapMaskToRGBPixelFloat(float maskX, float maskY, BoundingBox box, int rgbW, int rgbH)
     {
-        float scaleYoloToRgb = rgbW / 640f;
+        float u = maskX / 160f;
+        float v = maskY / 160f;
 
-        float normX = maskX / 160f;
-        float normY = maskY / 160f;
+        float bboxCenterX_Norm = box.CenterX / 640f;
+        float bboxCenterY_Norm = box.CenterY / 640f;
+        float bboxW_Norm = box.Width / 640f;
+        float bboxH_Norm = box.Height / 640f;
 
-        float posInYoloX = box.CenterX - box.Width / 2f + normX * box.Width;
-        float posInYoloY = box.CenterY - box.Height / 2f + normY * box.Height;
+        float texU = 0.5f + bboxCenterX_Norm - bboxW_Norm * 0.5f + u * bboxW_Norm;
 
-        // [수정] Y축 매핑: Unity Texture는 Bottom-Left origin.
-        int pixelX = Mathf.RoundToInt(posInYoloX * scaleYoloToRgb + rgbW / 2f);
-        int pixelY = Mathf.RoundToInt(rgbH / 2f - posInYoloY * scaleYoloToRgb);
+        float boxBottomV = 0.5f - (bboxCenterY_Norm + bboxH_Norm * 0.5f);
+        float boxTopV = 0.5f - (bboxCenterY_Norm - bboxH_Norm * 0.5f);
+        float texV = boxBottomV + v * (boxTopV - boxBottomV);
+
+        // [보정] 위로 10% 올리기
+        texV += 0.1f;
+
+        int pixelX = Mathf.RoundToInt(texU * rgbW);
+        int pixelY = Mathf.RoundToInt(texV * rgbH);
 
         return new Vector2Int(Mathf.Clamp(pixelX, 0, rgbW - 1), Mathf.Clamp(pixelY, 0, rgbH - 1));
     }

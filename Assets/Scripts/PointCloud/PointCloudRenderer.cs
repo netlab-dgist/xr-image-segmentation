@@ -102,7 +102,7 @@ public class PointCloudRenderer : MonoBehaviour
 
     private void LateUpdate()
     {
-        if (_ieExecutor == null || !_ieExecutor.IsTracking)
+        if (_ieExecutor == null)
         {
             _lastPointCount = 0;
             return;

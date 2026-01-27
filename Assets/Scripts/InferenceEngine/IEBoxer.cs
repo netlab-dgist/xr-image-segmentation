@@ -99,6 +99,13 @@ public class IEBoxer : MonoBehaviour
         }
     }
 
+    // [추가] 단일 박스 그리기
+    public void DrawSingleBox(BoundingBox box)
+    {
+        DrawBox(box, 0); // 0번 인덱스 사용
+        ClearBoxes(1);   // 나머지 모두 숨김
+    }
+
     public string GetClassName(int labelId)
     {
         if (_labels == null || labelId < 0 || labelId >= _labels.Length) return "Unknown";
