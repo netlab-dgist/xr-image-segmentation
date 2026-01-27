@@ -37,6 +37,12 @@
             "name": "com.UnityTechnologies.com.unity.template.urpblank",
             "processId": 25671,
             "exited": true
+        },
+        {
+            "deviceId": "2G0YC5ZHBG000B",
+            "name": "com.UnityTechnologies.com.unity.template.urpblank",
+            "processId": 26011,
+            "exited": false
         }
     ],
     "m_Tags": {

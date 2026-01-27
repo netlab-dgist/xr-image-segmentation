@@ -168,12 +168,13 @@ public class DepthTextureProvider : MonoBehaviour
         float scaleX = (float)depthW / yoloInputSize.x;
         float scaleY = (float)depthH / yoloInputSize.y;
 
-        // BBox center → top-left 변환
-        float bboxLeft = box.CenterX - box.Width / 2;
-        float bboxTop = box.CenterY - box.Height / 2;
-
-        int bboxX = Mathf.RoundToInt(bboxLeft * scaleX);
-        int bboxY = Mathf.RoundToInt(bboxTop * scaleY);
+        // [수정] YOLO centered space -> Unity Texture space 변환
+        // CenterY가 음수(상단)일 때 Unity Y좌표는 커야 함 (상단)
+        int bboxX = Mathf.RoundToInt(box.CenterX * scaleX + depthW / 2f - (box.Width * scaleX / 2f));
+        // Y축 반전: (Height/2 - CenterY) - (BoxHeight/2)
+        // CenterY는 음수(상단) -> Height/2 - (-상단) = 큰값(상단)
+        // Box의 Top-Left(Unity 기준 상단) 구하기
+        int bboxY = Mathf.RoundToInt(depthH / 2f - box.CenterY * scaleY - (box.Height * scaleY / 2f));
         int bboxW = Mathf.RoundToInt(box.Width * scaleX);
         int bboxH = Mathf.RoundToInt(box.Height * scaleY);
 

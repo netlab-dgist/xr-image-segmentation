@@ -1,0 +1,231 @@
+// Compute Shader for extracting PointCloud from Depth + YOLO Mask
+// Fixed version with proper Texture2DArray handling and Y-axis correction
+
+#pragma kernel ExtractPointCloud
+#pragma kernel DebugMask
+
+// Input Textures - Depth is Texture2DArray (stereo)
+Texture2DArray<float> _DepthTexture;
+SamplerState sampler_DepthTexture;
+
+// Input Buffers
+StructuredBuffer<float> _MaskBuffer;      // 160x160 flat array (YOLO mask weights)
+StructuredBuffer<uint> _RGBBuffer;        // RGB packed as uint (RGBA32)
+
+// Output Buffers
+RWStructuredBuffer<float4> _PositionBuffer;  // xyz, w=1 (valid)
+RWStructuredBuffer<uint> _ColorBuffer;       // RGBA packed
+RWStructuredBuffer<int> _CounterBuffer;      // [0]=pointCount, [1]=maskPassCount, [2]=uvFailCount, [3]=depthFailCount
+
+// Uniforms - Camera Intrinsics & Pose (RGB Camera)
+float4 _CameraIntrinsics;     // fx, fy, cx, cy (in RGB resolution pixels)
+float4 _CameraPosition;       // Camera world position
+float4x4 _CameraRotation;     // Camera rotation matrix (world space)
+
+// BBox parameters (YOLO 640 centered space)
+float4 _BBoxParams;           // centerX, centerY, width, height
+
+// Other parameters
+float _ConfidenceThreshold;
+int _RGBWidth;
+int _RGBHeight;
+int _DepthWidth;
+int _DepthHeight;
+int _MaxPoints;
+float _MinDepth;
+float _MaxDepth;
+
+// Depth conversion params (from Meta SDK)
+float4 _DepthZBufferParams;   // x=invDepthFactor, y=depthOffset
+
+// Depth reprojection (for proper depth sampling)
+float4x4 _DepthReprojMatrix;  // World to Depth clip space
+
+// For sub-sampling
+int _SubSampleFactor;
+
+// Helper: Convert mask coordinate to RGB pixel coordinate
+// This matches IEMasker's coordinate system exactly
+int2 MaskToRGBPixel(float maskX, float maskY, float4 bbox, int rgbW, int rgbH)
+{
+    float scaleYoloToRgb = (float)rgbW / 640.0;
+
+    // Normalize mask position [0, 1]
+    float normX = maskX / 160.0;
+    float normY = maskY / 160.0;
+
+    // BBox is in YOLO centered space (CenterX, CenterY in [-320, 320])
+    float posInYoloX = bbox.x - bbox.z * 0.5 + normX * bbox.z;
+    float posInYoloY = bbox.y - bbox.w * 0.5 + normY * bbox.w;
+
+    // [수정] C#과 동일하게 Y축 매핑 수정
+    // YOLO 상단(posInYoloY < 0) -> RGB 상단(pixelY 큼)
+    // Unity Texture coordinate: (0,0) is Bottom-Left
+    int pixelX = (int)(posInYoloX * scaleYoloToRgb + rgbW * 0.5);
+    int pixelY = (int)(rgbH * 0.5 - posInYoloY * scaleYoloToRgb);
+
+    return int2(clamp(pixelX, 0, rgbW - 1), clamp(pixelY, 0, rgbH - 1));
+}
+
+// [수정] 반복적 재투영을 통한 깊이 샘플링 (Parallax Correction)
+// RGB 픽셀 방향으로 Ray를 쏘아 올바른 Depth 값을 찾음
+float SampleDepthIterative(float3 rayOrigin, float3 rayDir)
+{
+    // 1. 초기 추정: 일정 거리(예: 1m) 또는 단순 샘플링 값
+    float currentDepth = 1.0; 
+    
+    // 단순 샘플링으로 초기값 잡기 (수렴 속도 향상)
+    // 하지만 UV 매칭이 안되므로 오히려 나쁠 수도 있음. 
+    // 여기서는 안전하게 1.0m에서 시작하거나, 이전 프레임 값을 쓸 수 없으니 고정값 사용.
+
+    // 2. 반복 보정 (3회 정도면 충분히 수렴)
+    for(int i = 0; i < 3; i++)
+    {
+        // 현재 추정된 깊이에서의 월드 좌표
+        float3 estimatedWorldPos = rayOrigin + rayDir * currentDepth;
+
+        // 월드 좌표 -> Depth Clip Space 재투영
+        float4 depthClip = mul(_DepthReprojMatrix, float4(estimatedWorldPos, 1.0));
+        
+        // NDC 변환
+        float2 depthNDC = depthClip.xy / depthClip.w;
+        
+        // UV 변환 [0,1]
+        float2 depthUV = depthNDC * 0.5 + 0.5;
+
+        // 범위 체크
+        if (depthUV.x < 0.0 || depthUV.x > 1.0 || depthUV.y < 0.0 || depthUV.y > 1.0)
+            return -1.0; // 유효하지 않은 영역
+
+        // Depth Texture 샘플링
+        int dx = (int)(depthUV.x * (_DepthWidth - 1));
+        int dy = (int)(depthUV.y * (_DepthHeight - 1));
+        float rawDepth = _DepthTexture[int3(dx, dy, 0)];
+
+        // Linear Depth 변환
+        float depthNdc = rawDepth * 2.0 - 1.0;
+        float sampledDepth = _DepthZBufferParams.x / (depthNdc + _DepthZBufferParams.y);
+
+        // 깊이 값 갱신
+        currentDepth = sampledDepth;
+    }
+
+    return currentDepth;
+}
+
+[numthreads(8, 8, 1)]
+void ExtractPointCloud(uint3 id : SV_DispatchThreadID)
+{
+    // Boundary check for 160x160 mask
+    if (id.x >= 160 || id.y >= 160) return;
+
+    // 1. Sample mask value
+    // IMPORTANT: Match IEMasker's Y-flip: posY = maskH - y - 1
+    int flippedY = 159 - (int)id.y;
+    int maskIdx = flippedY * 160 + id.x;
+    float maskVal = _MaskBuffer[maskIdx];
+
+    // 2. Mask confidence check
+    if (maskVal < _ConfidenceThreshold)
+        return;
+
+    // Count mask pixels that passed
+    InterlockedAdd(_CounterBuffer[1], 1);
+
+    // 3. Map mask coordinate to RGB pixel
+    // Use original (non-flipped) mask coordinates for spatial mapping
+    float maskX = (float)id.x;
+    float maskY = (float)id.y;
+
+    int2 rgbPixel = MaskToRGBPixel(maskX, maskY, _BBoxParams, _RGBWidth, _RGBHeight);
+
+    // 4. Calculate Ray Direction in World Space FIRST
+    float fx = _CameraIntrinsics.x;
+    float fy = _CameraIntrinsics.y;
+    float cx = _CameraIntrinsics.z;
+    float cy = _CameraIntrinsics.w;
+
+    float3 dirInCamera = float3(
+        (rgbPixel.x - cx) / fx,
+        (rgbPixel.y - cy) / fy,
+        1.0
+    );
+    dirInCamera = normalize(dirInCamera);
+    float3 dirInWorld = mul((float3x3)_CameraRotation, dirInCamera);
+
+    // 5. Sample Depth with Parallax Correction
+    float depthMeters = SampleDepthIterative(_CameraPosition.xyz, dirInWorld);
+
+    // 6. Depth range filter
+    // If depth sampling failed (returned -1) or out of range
+    if (depthMeters < _MinDepth || depthMeters > _MaxDepth)
+    {
+        InterlockedAdd(_CounterBuffer[3], 1);
+        return;
+    }
+
+    // 7. Compute final world position
+    float3 worldPos = _CameraPosition.xyz + dirInWorld * depthMeters;
+
+    // 8. Atomic append to output buffer
+    int idx;
+    InterlockedAdd(_CounterBuffer[0], 1, idx);
+    if (idx >= _MaxPoints) return;
+
+    _PositionBuffer[idx] = float4(worldPos, 1.0);
+
+    // 9. Sample RGB color
+    int rgbIdx = rgbPixel.y * _RGBWidth + rgbPixel.x;
+    if (rgbIdx >= 0 && rgbIdx < _RGBWidth * _RGBHeight)
+    {
+        _ColorBuffer[idx] = _RGBBuffer[rgbIdx];
+    }
+    else
+    {
+        _ColorBuffer[idx] = 0xFFFFFFFF;
+    }
+}
+
+// Debug kernel to visualize which mask pixels are being processed
+[numthreads(8, 8, 1)]
+void DebugMask(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= 160 || id.y >= 160) return;
+
+    int flippedY = 159 - (int)id.y;
+    int maskIdx = flippedY * 160 + id.x;
+    float maskVal = _MaskBuffer[maskIdx];
+
+    if (maskVal > _ConfidenceThreshold)
+    {
+        InterlockedAdd(_CounterBuffer[1], 1);
+
+        int2 rgbPixel = MaskToRGBPixel((float)id.x, (float)id.y, _BBoxParams, _RGBWidth, _RGBHeight);
+        
+        // Calculate Ray Direction for Iterative Sampling
+        float fx = _CameraIntrinsics.x;
+        float fy = _CameraIntrinsics.y;
+        float cx = _CameraIntrinsics.z;
+        float cy = _CameraIntrinsics.w;
+
+        float3 dirInCamera = float3(
+            (rgbPixel.x - cx) / fx,
+            (rgbPixel.y - cy) / fy,
+            1.0
+        );
+        dirInCamera = normalize(dirInCamera);
+        float3 dirInWorld = mul((float3x3)_CameraRotation, dirInCamera);
+
+        // Use Iterative Sampling
+        float depthMeters = SampleDepthIterative(_CameraPosition.xyz, dirInWorld);
+
+        if (depthMeters >= _MinDepth && depthMeters <= _MaxDepth)
+        {
+            InterlockedAdd(_CounterBuffer[0], 1);
+        }
+        else
+        {
+            InterlockedAdd(_CounterBuffer[3], 1);
+        }
+    }
+}
