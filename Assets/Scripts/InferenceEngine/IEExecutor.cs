@@ -635,6 +635,7 @@ public class IEExecutor : MonoBehaviour
         _counterBuffer.GetData(_counterData);
         CurrentPointCount = Mathf.Min(_counterData[0], _maxPoints);
         int maskPassCount = _counterData[1];
+        int uvFailCount = _counterData[2];
         int depthFailCount = _counterData[3];
 
         // 11. PointBuffer로 복사
@@ -657,7 +658,7 @@ public class IEExecutor : MonoBehaviour
         if (Time.frameCount % 30 == 0)
         {
             float passRate = maskPassCount > 0 ? (float)CurrentPointCount / maskPassCount * 100f : 0f;
-            Debug.Log($"[IEExecutor] GPU PointCloud: mask passed={maskPassCount}, depth fail={depthFailCount}, final points={CurrentPointCount} ({passRate:F1}%)");
+            Debug.Log($"[IEExecutor] GPU PointCloud: mask={maskPassCount}, uvFail={uvFailCount}, depthFail={depthFailCount}, final={CurrentPointCount} ({passRate:F1}%)");
             Debug.Log($"[IEExecutor] BBox: center=({box.CenterX:F1}, {box.CenterY:F1}), size=({box.Width:F1}x{box.Height:F1})");
         }
     }
@@ -824,7 +825,9 @@ public class IEExecutor : MonoBehaviour
                             {
                                 if (_includeInvalidDepth && avgDepthForFallback > _minDepthRange)
                                 {
-                                    depthMeters = avgDepthForFallback;
+                                    // fallback에 작은 노이즈 추가 (직선 패턴 방지)
+                                    float noise = (((subMaskX + subMaskY) * 0.01f) % 0.02f) - 0.01f;
+                                    depthMeters = avgDepthForFallback + noise;
                                     if (sx == 0 && sy == 0) fallbackUsedCount++;
                                 }
                                 else
@@ -858,6 +861,43 @@ public class IEExecutor : MonoBehaviour
             float passRate = maskPixelCount > 0 ? (float)depthSampleCount / maskPixelCount * 100f : 0f;
             Debug.Log($"[IEExecutor] CPU PointCloud: mask={maskPixelCount}, fallback={fallbackUsedCount}, filtered={depthFilteredCount}, valid={CurrentPointCount} ({passRate:F1}%)");
             Debug.Log($"[IEExecutor] Depth range: min={minDepth:F3}m, max={maxDepth:F3}m, avg={avgDepth:F3}m");
+
+            // [진단] Y좌표별 마스크 및 depth 분포 확인
+            int[] yBins = new int[4]; // 0-39, 40-79, 80-119, 120-159
+            float[] yDepthSum = new float[4];
+            int[] yDepthCount = new int[4];
+            for (int my = 0; my < 160; my += _samplingStep)
+            {
+                for (int mx = 0; mx < 160; mx += _samplingStep)
+                {
+                    int flippedY = 159 - my;
+                    float maskVal = _output3MaskWeights[targetIndex, flippedY, mx];
+                    if (maskVal > _pointCloudConfidence)
+                    {
+                        yBins[my / 40]++;
+
+                        // 해당 위치의 depth 샘플링
+                        Vector2Int rgbPx = MapMaskToRGBPixelFloat(mx, my, box, rgbW, rgbH);
+                        float u = (float)rgbPx.x / rgbW;
+                        float v = (float)rgbPx.y / rgbH;
+                        int dxi = Mathf.FloorToInt(u * (depthW - 1));
+                        int dyi = Mathf.FloorToInt(v * (depthH - 1));
+                        float rawD = depthData[dyi * depthW + dxi];
+                        float dM = isAlreadyLinear ? rawD : zParams.x / (rawD * 2.0f - 1.0f + zParams.y);
+                        if (dM > _minDepthRange && dM < _maxDepthRange)
+                        {
+                            yDepthSum[my / 40] += dM;
+                            yDepthCount[my / 40]++;
+                        }
+                    }
+                }
+            }
+            float d0 = yDepthCount[0] > 0 ? yDepthSum[0] / yDepthCount[0] : 0;
+            float d1 = yDepthCount[1] > 0 ? yDepthSum[1] / yDepthCount[1] : 0;
+            float d2 = yDepthCount[2] > 0 ? yDepthSum[2] / yDepthCount[2] : 0;
+            float d3 = yDepthCount[3] > 0 ? yDepthSum[3] / yDepthCount[3] : 0;
+            Debug.Log($"[IEExecutor] Mask Y분포: [0-39]={yBins[0]}, [40-79]={yBins[1]}, [80-119]={yBins[2]}, [120-159]={yBins[3]}");
+            Debug.Log($"[IEExecutor] Depth Y평균: [0-39]={d0:F3}m, [40-79]={d1:F3}m, [80-119]={d2:F3}m, [120-159]={d3:F3}m");
         }
     }
 

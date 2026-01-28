@@ -93,9 +93,12 @@ float SampleDepthIterative(float3 rayOrigin, float3 rayDir)
         // UV 변환 [0,1]
         float2 depthUV = depthNDC * 0.5 + 0.5;
 
-        // 범위 체크
+        // 범위 체크 - UV 실패 시 카운터 증가 (진단용)
         if (depthUV.x < 0.0 || depthUV.x > 1.0 || depthUV.y < 0.0 || depthUV.y > 1.0)
+        {
+            InterlockedAdd(_CounterBuffer[2], 1);  // uvFailCount
             return -1.0; // 유효하지 않은 영역
+        }
 
         // Depth Texture 샘플링
         int dx = (int)(depthUV.x * (_DepthWidth - 1));

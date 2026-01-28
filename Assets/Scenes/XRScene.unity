@@ -1371,12 +1371,12 @@ MonoBehaviour:
   _depthManager: {fileID: 700560618}
   _webCamManager: {fileID: 1675638408}
   _captureRGBD: 1
-  _maxPoints: 8000
+  _maxPoints: 200000
   _samplingStep: 1
   _subSamplingFactor: 2
-  _pointCloudConfidence: 0.3
-  _includeInvalidDepth: 1
-  _fallbackDepth: 0
+  _pointCloudConfidence: 0.1
+  _includeInvalidDepth: 0
+  _fallbackDepth: 0.2
   _pointCloudShader: {fileID: 7200000, guid: db8d87a3a4f86af468a8eeef2e58f8cb, type: 3}
   _minDepthRange: 0.1
   _maxDepthRange: 3
@@ -1766,7 +1766,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   _ieExecutor: {fileID: 787607880}
   _pointMaterial: {fileID: 2100000, guid: d47b219874c9ae24aa807bf1980ed07c, type: 2}
-  _pointSize: 0.02
+  _pointSize: 0.08
   _sizeAttenuation: 1
   _attenuationMinDist: 0.5
   _attenuationMaxDist: 3

@@ -10,30 +10,6 @@
     "m_KnownProcessesForSerialization": [
         {
             "deviceId": "2G0YC5ZHBG000B",
-            "name": "com.oculus.vrshell",
-            "processId": 2572,
-            "exited": false
-        },
-        {
-            "deviceId": "2G0YC5ZHBG000B",
-            "name": "com.UnityTechnologies.com.unity.template.urpblank",
-            "processId": 12702,
-            "exited": true
-        },
-        {
-            "deviceId": "2G0YC5ZHBG000B",
-            "name": "com.UnityTechnologies.com.unity.template.urpblank",
-            "processId": 13432,
-            "exited": true
-        },
-        {
-            "deviceId": "2G0YC5ZHBG000B",
-            "name": "com.UnityTechnologies.com.unity.template.urpblank",
-            "processId": 8386,
-            "exited": true
-        },
-        {
-            "deviceId": "2G0YC5ZHBG000B",
             "name": "com.UnityTechnologies.com.unity.template.urpblank",
             "processId": 25671,
             "exited": true
@@ -42,6 +18,30 @@
             "deviceId": "2G0YC5ZHBG000B",
             "name": "com.UnityTechnologies.com.unity.template.urpblank",
             "processId": 26011,
+            "exited": true
+        },
+        {
+            "deviceId": "2G0YC5ZHBG000B",
+            "name": "com.UnityTechnologies.com.unity.template.urpblank",
+            "processId": 5343,
+            "exited": true
+        },
+        {
+            "deviceId": "2G0YC5ZHBG000B",
+            "name": "com.oculus.vrshell",
+            "processId": 3572,
+            "exited": false
+        },
+        {
+            "deviceId": "2G0YC5ZHBG000B",
+            "name": "com.UnityTechnologies.com.unity.template.urpblank",
+            "processId": 8174,
+            "exited": true
+        },
+        {
+            "deviceId": "2G0YC5ZHBG000B",
+            "name": "com.UnityTechnologies.com.unity.template.urpblank",
+            "processId": 29526,
             "exited": false
         }
     ],
@@ -99,7 +99,7 @@
         "AutoCapture": true
     },
     "m_FilterOptions": {
-        "m_Filter": "",
+        "m_Filter": "[point",
         "m_UseRegularExpressions": false,
         "m_MatchCase": false
     },

@@ -124,18 +124,40 @@ public class PointCloudRenderer : MonoBehaviour
     {
         int safeCount = Mathf.Min(pointCount, _maxPoints);
 
+        Vector3 min = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+        Vector3 max = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+
         for (int i = 0; i < safeCount; i++)
         {
             _positionArray[i] = _ieExecutor.PointBuffer[i].worldPos;
 
             Color32 c = _ieExecutor.PointBuffer[i].color;
             _colorArray[i] = (uint)(c.r | (c.g << 8) | (c.b << 16) | (c.a << 24));
+
+            // Bounds 계산용 min/max 갱신
+            min = Vector3.Min(min, _positionArray[i]);
+            max = Vector3.Max(max, _positionArray[i]);
         }
 
         _positionBuffer.SetData(_positionArray, 0, 0, safeCount);
         _colorBuffer.SetData(_colorArray, 0, 0, safeCount);
 
         _lastPointCount = safeCount;
+
+        // 동적 bounds 업데이트
+        if (safeCount > 0)
+        {
+            Vector3 center = (min + max) * 0.5f;
+            Vector3 size = (max - min) + Vector3.one * 0.1f;
+            _pointMesh.bounds = new Bounds(center, size);
+        }
+
+        // 디버그 로그 (30프레임마다)
+        if (_showDebugInfo && Time.frameCount % 30 == 0)
+        {
+            Debug.Log($"[PointCloudRenderer] Points={safeCount}, BoundsCenter={_pointMesh.bounds.center:F3}, BoundsSize={_pointMesh.bounds.size:F3}");
+            Debug.Log($"[PointCloudRenderer] PositionRange: min={min:F3}, max={max:F3}");
+        }
     }
 
     private void RenderPoints(int pointCount)
