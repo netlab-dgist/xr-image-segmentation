@@ -25,6 +25,12 @@ float4x4 _CameraRotation;     // Camera rotation matrix (world space)
 // BBox parameters (YOLO 640 centered space)
 float4 _BBoxParams;           // centerX, centerY, width, height
 
+// [CALIBRATION] - WYSIWYG: VRMaskOverlay 조절 값을 Depth Sampling에 반영
+// 이 값들은 모두 **픽셀 공간** 기준 (VRMaskOverlay에서 변환하여 전달)
+float _CalibrationYOffset;    // Y-axis adjustment (Pixel Space) - 위아래 이동
+float _CalibrationXOffset;    // X-axis adjustment (Pixel Space) - 좌우 이동
+float _CalibrationScale;      // Scale adjustment (Center pivot) - 크기 조절
+
 // Other parameters
 float _ConfidenceThreshold;
 int _RGBWidth;
@@ -41,11 +47,10 @@ float4 _DepthZBufferParams;   // x=invDepthFactor, y=depthOffset
 // Depth reprojection (for proper depth sampling)
 float4x4 _DepthReprojMatrix;  // World to Depth clip space
 
-// For sub-sampling
-int _SubSampleFactor;
+// [Step 4] Depth Discontinuity Filter 설정
+float _DepthDiscontinuityThreshold;  // 불연속 판단 임계값 (미터 단위, 예: 0.1m)
 
 // Helper: Convert mask coordinate to RGB pixel coordinate
-// This matches IEMasker's coordinate system exactly
 int2 MaskToRGBPixel(float maskX, float maskY, float4 bbox, int rgbW, int rgbH)
 {
     float scaleYoloToRgb = (float)rgbW / 640.0;
@@ -58,8 +63,6 @@ int2 MaskToRGBPixel(float maskX, float maskY, float4 bbox, int rgbW, int rgbH)
     float posInYoloX = bbox.x - bbox.z * 0.5 + normX * bbox.z;
     float posInYoloY = bbox.y - bbox.w * 0.5 + normY * bbox.w;
 
-    // [수정] C#과 동일하게 Y축 매핑 수정
-    // YOLO 상단(posInYoloY < 0) -> RGB 상단(pixelY 큼)
     // Unity Texture coordinate: (0,0) is Bottom-Left
     int pixelX = (int)(posInYoloX * scaleYoloToRgb + rgbW * 0.5);
     int pixelY = (int)(rgbH * 0.5 - posInYoloY * scaleYoloToRgb);
@@ -67,53 +70,104 @@ int2 MaskToRGBPixel(float maskX, float maskY, float4 bbox, int rgbW, int rgbH)
     return int2(clamp(pixelX, 0, rgbW - 1), clamp(pixelY, 0, rgbH - 1));
 }
 
-// [수정] 반복적 재투영을 통한 깊이 샘플링 (Parallax Correction)
-// RGB 픽셀 방향으로 Ray를 쏘아 올바른 Depth 값을 찾음
+// 단일 깊이 값 샘플링 (내부 헬퍼)
+float SampleDepthAtUV(float2 depthUV)
+{
+    if (depthUV.x < 0.0 || depthUV.x > 1.0 || depthUV.y < 0.0 || depthUV.y > 1.0)
+        return -1.0;
+
+    int dx = (int)(depthUV.x * (_DepthWidth - 1));
+    int dy = (int)(depthUV.y * (_DepthHeight - 1));
+    float rawDepth = _DepthTexture[int3(dx, dy, 0)];
+
+    float depthNdc = rawDepth * 2.0 - 1.0;
+    return _DepthZBufferParams.x / (depthNdc + _DepthZBufferParams.y);
+}
+
 float SampleDepthIterative(float3 rayOrigin, float3 rayDir)
 {
-    // 1. 초기 추정: 일정 거리(예: 1m) 또는 단순 샘플링 값
-    float currentDepth = 1.0; 
-    
-    // 단순 샘플링으로 초기값 잡기 (수렴 속도 향상)
-    // 하지만 UV 매칭이 안되므로 오히려 나쁠 수도 있음. 
-    // 여기서는 안전하게 1.0m에서 시작하거나, 이전 프레임 값을 쓸 수 없으니 고정값 사용.
-
-    // 2. 반복 보정 (3회 정도면 충분히 수렴)
+    float currentDepth = 1.0;
     for(int i = 0; i < 3; i++)
     {
-        // 현재 추정된 깊이에서의 월드 좌표
         float3 estimatedWorldPos = rayOrigin + rayDir * currentDepth;
-
-        // 월드 좌표 -> Depth Clip Space 재투영
         float4 depthClip = mul(_DepthReprojMatrix, float4(estimatedWorldPos, 1.0));
-        
-        // NDC 변환
         float2 depthNDC = depthClip.xy / depthClip.w;
-        
-        // UV 변환 [0,1]
         float2 depthUV = depthNDC * 0.5 + 0.5;
 
-        // 범위 체크 - UV 실패 시 카운터 증가 (진단용)
         if (depthUV.x < 0.0 || depthUV.x > 1.0 || depthUV.y < 0.0 || depthUV.y > 1.0)
         {
-            InterlockedAdd(_CounterBuffer[2], 1);  // uvFailCount
-            return -1.0; // 유효하지 않은 영역
+            InterlockedAdd(_CounterBuffer[2], 1);
+            return -1.0;
         }
 
-        // Depth Texture 샘플링
         int dx = (int)(depthUV.x * (_DepthWidth - 1));
         int dy = (int)(depthUV.y * (_DepthHeight - 1));
         float rawDepth = _DepthTexture[int3(dx, dy, 0)];
 
-        // Linear Depth 변환
         float depthNdc = rawDepth * 2.0 - 1.0;
         float sampledDepth = _DepthZBufferParams.x / (depthNdc + _DepthZBufferParams.y);
-
-        // 깊이 값 갱신
         currentDepth = sampledDepth;
     }
-
     return currentDepth;
+}
+
+// [Step 4] Depth Discontinuity Filter
+// 마스크 경계에서 배경 Depth를 잘못 샘플링하는 문제 완화
+// 주변 4픽셀과 비교하여 현재 Depth가 크게 다르면 불연속으로 판단
+float SampleDepthWithDiscontinuityFilter(float3 rayOrigin, float3 rayDir, out bool isDiscontinuity)
+{
+    isDiscontinuity = false;
+
+    // 중심 깊이 샘플링
+    float centerDepth = 1.0;
+    float2 centerUV;
+
+    for(int i = 0; i < 3; i++)
+    {
+        float3 estimatedWorldPos = rayOrigin + rayDir * centerDepth;
+        float4 depthClip = mul(_DepthReprojMatrix, float4(estimatedWorldPos, 1.0));
+        float2 depthNDC = depthClip.xy / depthClip.w;
+        centerUV = depthNDC * 0.5 + 0.5;
+
+        if (centerUV.x < 0.0 || centerUV.x > 1.0 || centerUV.y < 0.0 || centerUV.y > 1.0)
+        {
+            InterlockedAdd(_CounterBuffer[2], 1);
+            return -1.0;
+        }
+
+        centerDepth = SampleDepthAtUV(centerUV);
+        if (centerDepth < 0) return -1.0;
+    }
+
+    // Discontinuity 필터가 비활성화되어 있으면 바로 반환
+    if (_DepthDiscontinuityThreshold <= 0.0)
+        return centerDepth;
+
+    // 주변 4픽셀 깊이 샘플링 (상하좌우)
+    float pixelStep = 1.0 / (float)_DepthWidth;
+    float neighborDepths[4];
+    neighborDepths[0] = SampleDepthAtUV(centerUV + float2(pixelStep, 0));   // 오른쪽
+    neighborDepths[1] = SampleDepthAtUV(centerUV + float2(-pixelStep, 0));  // 왼쪽
+    neighborDepths[2] = SampleDepthAtUV(centerUV + float2(0, pixelStep));   // 위
+    neighborDepths[3] = SampleDepthAtUV(centerUV + float2(0, -pixelStep));  // 아래
+
+    // 불연속 판단: 중심과 주변의 차이가 임계값을 넘으면 경계로 판단
+    int discontinuityCount = 0;
+    for (int j = 0; j < 4; j++)
+    {
+        if (neighborDepths[j] > 0 && abs(centerDepth - neighborDepths[j]) > _DepthDiscontinuityThreshold)
+        {
+            discontinuityCount++;
+        }
+    }
+
+    // 2개 이상의 이웃과 불연속이면 경계 픽셀로 판단
+    if (discontinuityCount >= 2)
+    {
+        isDiscontinuity = true;
+    }
+
+    return centerDepth;
 }
 
 [numthreads(8, 8, 1)]
@@ -123,26 +177,44 @@ void ExtractPointCloud(uint3 id : SV_DispatchThreadID)
     if (id.x >= 160 || id.y >= 160) return;
 
     // 1. Sample mask value
-    // IMPORTANT: Match IEMasker's Y-flip: posY = maskH - y - 1
-    int flippedY = 159 - (int)id.y;
-    int maskIdx = flippedY * 160 + id.x;
+    // [FIX] Do NOT flip Y. Match YOLO's Top-Down data with our Top-Down logic.
+    int maskIdx = id.y * 160 + id.x;
     float maskVal = _MaskBuffer[maskIdx];
 
-    // 2. Mask confidence check
+    // 2. Mask confidence check (Restored)
     if (maskVal < _ConfidenceThreshold)
         return;
 
-    // Count mask pixels that passed
     InterlockedAdd(_CounterBuffer[1], 1);
 
-    // 3. Map mask coordinate to RGB pixel
-    // Use original (non-flipped) mask coordinates for spatial mapping
     float maskX = (float)id.x;
     float maskY = (float)id.y;
 
     int2 rgbPixel = MaskToRGBPixel(maskX, maskY, _BBoxParams, _RGBWidth, _RGBHeight);
 
-    // 4. Calculate Ray Direction in World Space FIRST
+    // [CALIBRATION] WYSIWYG: VRMaskOverlay에서 조절한 값을 Depth Sampling에 반영
+    // 핵심 원리: Overlay를 움직인 만큼 Depth Sampling 위치도 움직여야 함
+    // - 사용자가 마스크를 오른쪽으로 옮기면 -> 오른쪽 위치의 Depth를 읽어야 함
+    // - 사용자가 마스크를 아래로 옮기면 -> 아래쪽 위치의 Depth를 읽어야 함
+    float2 center = float2(_RGBWidth * 0.5, _RGBHeight * 0.5);
+    float2 centered = (float2)rgbPixel - center;
+
+    // 1. Scale 적용 (VRMaskOverlay 크기 조절에 대응)
+    // Overlay가 커지면 더 넓은 범위를 커버 -> 픽셀 좌표도 확장
+    if (_CalibrationScale > 0.0001)
+    {
+        centered *= _CalibrationScale;
+    }
+
+    // 2. X/Y Offset 적용 (VRMaskOverlay 위치 조절에 대응)
+    // Overlay를 움직인 방향으로 샘플링 위치도 이동
+    rgbPixel = int2(centered + center);
+    rgbPixel.x += (int)_CalibrationXOffset;
+    rgbPixel.y += (int)_CalibrationYOffset;  // [Step 3] Y도 픽셀 좌표에 적용
+
+    rgbPixel.x = clamp(rgbPixel.x, 0, _RGBWidth - 1);
+    rgbPixel.y = clamp(rgbPixel.y, 0, _RGBHeight - 1);
+
     float fx = _CameraIntrinsics.x;
     float fy = _CameraIntrinsics.y;
     float cx = _CameraIntrinsics.z;
@@ -156,18 +228,25 @@ void ExtractPointCloud(uint3 id : SV_DispatchThreadID)
     dirInCamera = normalize(dirInCamera);
     float3 dirInWorld = mul((float3x3)_CameraRotation, dirInCamera);
 
-    // 5. Sample Depth with Parallax Correction
-    float depthMeters = SampleDepthIterative(_CameraPosition.xyz, dirInWorld);
+    // [Step 4] Depth Discontinuity Filter 적용
+    bool isDiscontinuity = false;
+    float depthMeters = SampleDepthWithDiscontinuityFilter(_CameraPosition.xyz, dirInWorld, isDiscontinuity);
 
-    // 6. Depth range filter
-    // If depth sampling failed (returned -1) or out of range
     if (depthMeters < _MinDepth || depthMeters > _MaxDepth)
     {
         InterlockedAdd(_CounterBuffer[3], 1);
         return;
     }
 
+    // [Step 4] 경계 픽셀은 제외 (배경 Depth 오염 방지)
+    if (isDiscontinuity)
+    {
+        InterlockedAdd(_CounterBuffer[3], 1);  // depthFail로 카운트
+        return;
+    }
+
     // 7. Compute final world position
+    // [Step 3] Calibration은 이미 픽셀 좌표에 적용됨 -> 여기서 추가 조정 불필요
     float3 worldPos = _CameraPosition.xyz + dirInWorld * depthMeters;
 
     // 8. Atomic append to output buffer
@@ -177,7 +256,6 @@ void ExtractPointCloud(uint3 id : SV_DispatchThreadID)
 
     _PositionBuffer[idx] = float4(worldPos, 1.0);
 
-    // 9. Sample RGB color
     int rgbIdx = rgbPixel.y * _RGBWidth + rgbPixel.x;
     if (rgbIdx >= 0 && rgbIdx < _RGBWidth * _RGBHeight)
     {

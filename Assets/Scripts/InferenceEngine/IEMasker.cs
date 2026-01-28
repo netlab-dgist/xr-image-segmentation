@@ -18,6 +18,15 @@ public class IEMasker
     private Texture2D _currentMaskTexture;
     public Texture2D CurrentMaskTexture => _currentMaskTexture;
 
+    public void UpdateDisplayLocation(Transform newLoc)
+    {
+        _displayLocation = newLoc;
+        foreach (var img in _maskImages)
+        {
+            if (img != null) img.transform.SetParent(_displayLocation, false);
+        }
+    }
+
     public IEMasker(Transform displayLocation, float confidenceThreshold)
     {
         _displayLocation = displayLocation;

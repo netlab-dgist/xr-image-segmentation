@@ -24,7 +24,7 @@ public class IEExecutor : MonoBehaviour
     [SerializeField] private ModelAsset _sentisModel;
     [SerializeField] private int _layersPerFrame = 12;
     [SerializeField] private float _confidenceThreshold = 0.5f;
-    [SerializeField] private Transform _displayLocation;
+    public Transform DisplayLocation; // [수정] public으로 변경
 
     [Header("Natural Tracking Settings")]
     [SerializeField] private int _maxLostFrames = 15;
@@ -62,6 +62,15 @@ public class IEExecutor : MonoBehaviour
     [SerializeField] private float _minDepthRange = 0.1f;
     [SerializeField] private float _maxDepthRange = 3.0f;
 
+    [Tooltip("[Step 4] Depth 불연속 필터 임계값 (미터). 0이면 비활성화. 마스크 경계 노이즈 제거용.")]
+    [Range(0f, 0.5f)]
+    [SerializeField] private float _depthDiscontinuityThreshold = 0.1f;
+    
+    [Header("Calibration")]
+    public float CalibrationYOffset = 0.0f; 
+    public float CalibrationXOffset = 0.0f; // 추가
+    public float CalibrationScale = 1.0f;   // 추가
+
     // Compute Shader 버퍼
     private ComputeBuffer _maskBuffer;
     private ComputeBuffer _rgbBuffer;
@@ -89,9 +98,12 @@ public class IEExecutor : MonoBehaviour
     public bool IsTracking => _isTracking;
     public BoundingBox? LockedTargetBox => _lockedTargetBox;
 
+    // [추가] 트래킹 중인 물체의 평균 Depth (마스크-PointCloud 정렬용)
+    public float TrackedObjectDepth { get; private set; } = 1.2f;
+
     [SerializeField] private IEBoxer _ieBoxer;
 
-    // [수정] _ieMasker는 MonoBehaviour가 아니므로 SerializeField 제거하고 new로 생성
+    // [수정] _ieMasker는 MonoBehaviour가 아니므로 new로 생성
     private IEMasker _ieMasker;
     private Worker _inferenceEngineWorker;
     private IEnumerator _schedule;
@@ -125,7 +137,12 @@ public class IEExecutor : MonoBehaviour
 
     private BoundingBox? _lockedTargetBox = null;
     private bool _isTracking = false;
+    private bool _pointCloudCaptured = false;  // 첫 캡처 완료 플래그
     private int _consecutiveLostFrames = 0;
+
+    // [Step 1] Preview/Capture 분리를 위한 플래그
+    private bool _previewMode = true;  // true: 마스크만 보여줌, false: PointCloud도 캡처
+    public bool IsPreviewMode => _previewMode;
 
     private Vector2 _centerVelocity;
     private Vector2 _sizeVelocity;
@@ -144,7 +161,7 @@ public class IEExecutor : MonoBehaviour
     {
         yield return new WaitForSeconds(0.05f);
         // [수정] Initialize 대신 생성자 사용
-        _ieMasker = new IEMasker(_displayLocation, _confidenceThreshold);
+        _ieMasker = new IEMasker(DisplayLocation, _confidenceThreshold);
         
         LoadModel();
     }
@@ -467,12 +484,21 @@ public class IEExecutor : MonoBehaviour
                 UpdateSmoothBox(bestBox);
                 _ieMasker.DrawSingleMask(bestIndex, bestBox, _output3MaskWeights, _inputSize.x, _inputSize.y);
 
-                if (_captureRGBD)
+                // [추가] 실시간으로 물체의 평균 Depth 계산 (마스크-PointCloud 정렬용)
+                UpdateTrackedObjectDepth(bestIndex, bestBox);
+
+                // [Step 1] Preview 모드가 아닐 때만 PointCloud 캡처
+                // Preview 모드: 마스크만 보여줌 (조절 가능)
+                // Capture 모드: A 버튼을 눌렀을 때 PointCloud 생성
+                if (_captureRGBD && !_pointCloudCaptured && !_previewMode)
                 {
                     if (_computeBuffersInitialized)
                         ExtractPointCloudGPU(bestIndex, bestBox);
                     else
                         ExtractRGBDData(bestIndex, bestBox);  // 폴백
+
+                    _pointCloudCaptured = true;
+                    Debug.Log($"[IEExecutor] PointCloud captured once: {CurrentPointCount} points");
                 }
             }
             else
@@ -534,7 +560,8 @@ public class IEExecutor : MonoBehaviour
     }
 
     /// <summary>
-    /// GPU Compute Shader를 사용하여 PointCloud 추출 (카메라 Intrinsics 기반)
+    /// GPU Compute Shader를 사용하여 PointCloud 추출
+    /// [QuestCameraKit 방식] RGB Passthrough 카메라 Intrinsics/Pose 사용 + Depth Reprojection
     /// </summary>
     private void ExtractPointCloudGPU(int targetIndex, BoundingBox box)
     {
@@ -548,7 +575,10 @@ public class IEExecutor : MonoBehaviour
         // 2. ZBuffer params 가져오기
         Vector4 zParams = Shader.GetGlobalVector("_EnvironmentDepthZBufferParams");
 
-        // 3. 카메라 intrinsics 및 pose 가져오기
+        // ===== [QuestCameraKit 방식] RGB Passthrough 카메라 사용 =====
+        // RGB 텍스처는 Passthrough 카메라에서 오므로, 해당 카메라의 Intrinsics/Pose 사용
+
+        // 3-1. RGB Passthrough 카메라 Intrinsics (실제 물리적 카메라 파라미터)
         if (!_intrinsicsCached)
         {
             _cachedIntrinsics = PassthroughCameraSamples.PassthroughCameraUtils.GetCameraIntrinsics(
@@ -556,27 +586,33 @@ public class IEExecutor : MonoBehaviour
             _intrinsicsCached = true;
         }
 
-        Pose cameraPose = PassthroughCameraSamples.PassthroughCameraUtils.GetCameraPoseInWorld(
+        // 3-2. RGB Passthrough 카메라 Pose (월드 공간에서의 위치/회전)
+        Pose rgbCameraPose = PassthroughCameraSamples.PassthroughCameraUtils.GetCameraPoseInWorld(
             PassthroughCameraSamples.PassthroughCameraEye.Left);
+        Vector3 rgbCameraPos = rgbCameraPose.position;
+        Quaternion rgbCameraRot = rgbCameraPose.rotation;
 
-        // [추가] 환경 깊이 재투영 행렬 가져오기 (Must read!!!.txt 참고)
+        // 4. Depth Reprojection 행렬 가져오기 (World → Depth 텍스처 UV 변환용)
+        // 이 행렬은 VR eye 기준이지만, World 좌표를 입력받으므로 RGB 카메라와 함께 사용 가능
         Matrix4x4[] reprojMatrices = Shader.GetGlobalMatrixArray("_EnvironmentDepthReprojectionMatrices");
         if (reprojMatrices != null && reprojMatrices.Length > 0)
         {
+            // Left eye(0) 사용 - RGB Passthrough도 Left이므로
             _pointCloudShader.SetMatrix("_DepthReprojMatrix", reprojMatrices[0]);
         }
 
-        // Intrinsics를 현재 RGB 해상도에 맞게 스케일링
+        // 5. RGB 텍스처 해상도 및 Intrinsics 스케일링
         int rgbW = _rgbRenderTexture != null ? _rgbRenderTexture.width : 1280;
         int rgbH = _rgbRenderTexture != null ? _rgbRenderTexture.height : 1280;
-        float intrinsicsScale = (float)rgbW / _cachedIntrinsics.Resolution.x;
 
-        Vector4 scaledIntrinsics = new Vector4(
-            _cachedIntrinsics.FocalLength.x * intrinsicsScale,
-            _cachedIntrinsics.FocalLength.y * intrinsicsScale,
-            _cachedIntrinsics.PrincipalPoint.x * intrinsicsScale,
-            _cachedIntrinsics.PrincipalPoint.y * intrinsicsScale
-        );
+        // Intrinsics를 현재 RGB 해상도에 맞게 스케일링
+        float intrinsicsScale = (float)rgbW / _cachedIntrinsics.Resolution.x;
+        float fx = _cachedIntrinsics.FocalLength.x * intrinsicsScale;
+        float fy = _cachedIntrinsics.FocalLength.y * intrinsicsScale;
+        float cx = _cachedIntrinsics.PrincipalPoint.x * intrinsicsScale;
+        float cy = _cachedIntrinsics.PrincipalPoint.y * intrinsicsScale;
+
+        Vector4 rgbIntrinsics = new Vector4(fx, fy, cx, cy);
 
         // 4. 마스크 데이터 추출 및 업로드 (Y축 뒤집기 없이 원본 그대로)
         float[] maskData = new float[160 * 160];
@@ -605,10 +641,10 @@ public class IEExecutor : MonoBehaviour
         for (int i = 0; i < 4; i++) _counterData[i] = 0;
         _counterBuffer.SetData(_counterData);
 
-        // 7. Compute Shader 유니폼 설정
-        _pointCloudShader.SetVector("_CameraIntrinsics", scaledIntrinsics);
-        _pointCloudShader.SetVector("_CameraPosition", new Vector4(cameraPose.position.x, cameraPose.position.y, cameraPose.position.z, 1));
-        _pointCloudShader.SetMatrix("_CameraRotation", Matrix4x4.Rotate(cameraPose.rotation));
+        // 7. Compute Shader 유니폼 설정 (RGB Passthrough 카메라 기준)
+        _pointCloudShader.SetVector("_CameraIntrinsics", rgbIntrinsics);
+        _pointCloudShader.SetVector("_CameraPosition", new Vector4(rgbCameraPos.x, rgbCameraPos.y, rgbCameraPos.z, 1));
+        _pointCloudShader.SetMatrix("_CameraRotation", Matrix4x4.Rotate(rgbCameraRot));
         _pointCloudShader.SetVector("_BBoxParams", new Vector4(box.CenterX, box.CenterY, box.Width, box.Height));
         _pointCloudShader.SetVector("_DepthZBufferParams", zParams);
         _pointCloudShader.SetFloat("_ConfidenceThreshold", _pointCloudConfidence);
@@ -619,6 +655,10 @@ public class IEExecutor : MonoBehaviour
         _pointCloudShader.SetInt("_MaxPoints", _maxPoints);
         _pointCloudShader.SetFloat("_MinDepth", _minDepthRange);
         _pointCloudShader.SetFloat("_MaxDepth", _maxDepthRange);
+        _pointCloudShader.SetFloat("_CalibrationYOffset", CalibrationYOffset);
+        _pointCloudShader.SetFloat("_CalibrationXOffset", CalibrationXOffset);
+        _pointCloudShader.SetFloat("_CalibrationScale", CalibrationScale);
+        _pointCloudShader.SetFloat("_DepthDiscontinuityThreshold", _depthDiscontinuityThreshold);
 
         // 8. 버퍼 바인딩
         _pointCloudShader.SetTexture(_kernelId, "_DepthTexture", depthRT);
@@ -726,9 +766,8 @@ public class IEExecutor : MonoBehaviour
             {
                 for (int x = 0; x < 160; x += _samplingStep)
                 {
-                    // IEMasker와 동일한 Y축 뒤집기
-                    int flippedY = 159 - y;
-                    float maskVal = _output3MaskWeights[targetIndex, flippedY, x];
+                    // [FIX] Y축 반전 제거
+                    float maskVal = _output3MaskWeights[targetIndex, y, x];
                     if (maskVal > _pointCloudConfidence)
                     {
                         Vector2Int rgbPixel = MapMaskToRGBPixelFloat(x, y, box, rgbW, rgbH);
@@ -769,9 +808,8 @@ public class IEExecutor : MonoBehaviour
             {
                 if (CurrentPointCount >= _maxPoints) break;
 
-                // IEMasker와 동일한 Y축 뒤집기
-                int flippedY = 159 - y;
-                float maskVal = _output3MaskWeights[targetIndex, flippedY, x];
+                // [FIX] Y축 반전 제거
+                float maskVal = _output3MaskWeights[targetIndex, y, x];
 
                 if (maskVal > _pointCloudConfidence)
                 {
@@ -845,6 +883,14 @@ public class IEExecutor : MonoBehaviour
                             Vector3 dirInWorld = cameraRot * dirInCamera.normalized;
                             Vector3 worldPos = cameraPos + dirInWorld * depthMeters;
 
+                            // [DIAGNOSIS] 중앙 픽셀 매핑 확인 로그
+                            if (x == 80 && y == 80 && sx == 0 && sy == 0)
+                            {
+                                Debug.Log($"[MAPPING_CHECK] Mask(80,80) -> RGB({rgbPixel.x},{rgbPixel.y}) -> DepthUV({u:F3},{v:F3}) -> World({worldPos.x:F3},{worldPos.y:F3},{worldPos.z:F3})");
+                                Debug.Log($"[MAPPING_CHECK] BBox Center: ({box.CenterX}, {box.CenterY}), Size: ({box.Width}x{box.Height})");
+                                Debug.Log($"[MAPPING_CHECK] RGB Size: {rgbW}x{rgbH}, Depth Size: {depthW}x{depthH}");
+                            }
+
                             PointBuffer[CurrentPointCount].worldPos = worldPos;
                             PointBuffer[CurrentPointCount].color = _rgbPixelCache[pixelIdx];
                             CurrentPointCount++;
@@ -861,43 +907,6 @@ public class IEExecutor : MonoBehaviour
             float passRate = maskPixelCount > 0 ? (float)depthSampleCount / maskPixelCount * 100f : 0f;
             Debug.Log($"[IEExecutor] CPU PointCloud: mask={maskPixelCount}, fallback={fallbackUsedCount}, filtered={depthFilteredCount}, valid={CurrentPointCount} ({passRate:F1}%)");
             Debug.Log($"[IEExecutor] Depth range: min={minDepth:F3}m, max={maxDepth:F3}m, avg={avgDepth:F3}m");
-
-            // [진단] Y좌표별 마스크 및 depth 분포 확인
-            int[] yBins = new int[4]; // 0-39, 40-79, 80-119, 120-159
-            float[] yDepthSum = new float[4];
-            int[] yDepthCount = new int[4];
-            for (int my = 0; my < 160; my += _samplingStep)
-            {
-                for (int mx = 0; mx < 160; mx += _samplingStep)
-                {
-                    int flippedY = 159 - my;
-                    float maskVal = _output3MaskWeights[targetIndex, flippedY, mx];
-                    if (maskVal > _pointCloudConfidence)
-                    {
-                        yBins[my / 40]++;
-
-                        // 해당 위치의 depth 샘플링
-                        Vector2Int rgbPx = MapMaskToRGBPixelFloat(mx, my, box, rgbW, rgbH);
-                        float u = (float)rgbPx.x / rgbW;
-                        float v = (float)rgbPx.y / rgbH;
-                        int dxi = Mathf.FloorToInt(u * (depthW - 1));
-                        int dyi = Mathf.FloorToInt(v * (depthH - 1));
-                        float rawD = depthData[dyi * depthW + dxi];
-                        float dM = isAlreadyLinear ? rawD : zParams.x / (rawD * 2.0f - 1.0f + zParams.y);
-                        if (dM > _minDepthRange && dM < _maxDepthRange)
-                        {
-                            yDepthSum[my / 40] += dM;
-                            yDepthCount[my / 40]++;
-                        }
-                    }
-                }
-            }
-            float d0 = yDepthCount[0] > 0 ? yDepthSum[0] / yDepthCount[0] : 0;
-            float d1 = yDepthCount[1] > 0 ? yDepthSum[1] / yDepthCount[1] : 0;
-            float d2 = yDepthCount[2] > 0 ? yDepthSum[2] / yDepthCount[2] : 0;
-            float d3 = yDepthCount[3] > 0 ? yDepthSum[3] / yDepthCount[3] : 0;
-            Debug.Log($"[IEExecutor] Mask Y분포: [0-39]={yBins[0]}, [40-79]={yBins[1]}, [80-119]={yBins[2]}, [120-159]={yBins[3]}");
-            Debug.Log($"[IEExecutor] Depth Y평균: [0-39]={d0:F3}m, [40-79]={d1:F3}m, [80-119]={d2:F3}m, [120-159]={d3:F3}m");
         }
     }
 
@@ -939,6 +948,71 @@ public class IEExecutor : MonoBehaviour
         int pixelY = Mathf.RoundToInt(rgbH / 2f - posInYoloY * scaleYoloToRgb);
 
         return new Vector2Int(Mathf.Clamp(pixelX, 0, rgbW - 1), Mathf.Clamp(pixelY, 0, rgbH - 1));
+    }
+
+    /// <summary>
+    /// 트래킹 중인 물체의 평균 Depth를 실시간으로 계산 (마스크-PointCloud 정렬용)
+    /// </summary>
+    private void UpdateTrackedObjectDepth(int targetIndex, BoundingBox box)
+    {
+        if (!_depthDataReady || _cpuDepthTex == null) return;
+        if (!_rgbDataReady || _rgbRenderTexture == null) return;
+
+        int rgbW = _rgbRenderTexture.width;
+        int rgbH = _rgbRenderTexture.height;
+        int depthW = _cpuDepthTex.width;
+        int depthH = _cpuDepthTex.height;
+
+        var depthData = _cpuDepthTex.GetRawTextureData<float>();
+        Vector4 zParams = Shader.GetGlobalVector("_EnvironmentDepthZBufferParams");
+        bool isAlreadyLinear = Shader.GetGlobalTexture("_PreprocessedEnvironmentDepthTexture") != null;
+
+        float sumDepth = 0f;
+        int validCount = 0;
+
+        // 마스크 중심 부근만 빠르게 샘플링 (성능 최적화)
+        for (int y = 60; y < 100; y += 4)
+        {
+            for (int x = 60; x < 100; x += 4)
+            {
+                float maskVal = _output3MaskWeights[targetIndex, y, x];
+                if (maskVal < _pointCloudConfidence) continue;
+
+                Vector2Int rgbPixel = MapMaskToRGBPixelFloat(x, y, box, rgbW, rgbH);
+                float u = (float)rgbPixel.x / rgbW;
+                float v = (float)rgbPixel.y / rgbH;
+                int dx = Mathf.FloorToInt(u * (depthW - 1));
+                int dy = Mathf.FloorToInt(v * (depthH - 1));
+
+                if (dx < 0 || dx >= depthW || dy < 0 || dy >= depthH) continue;
+
+                float rawDepth = depthData[dy * depthW + dx];
+                float depthMeters;
+
+                if (isAlreadyLinear)
+                {
+                    depthMeters = rawDepth;
+                }
+                else
+                {
+                    float depthNdc = rawDepth * 2.0f - 1.0f;
+                    depthMeters = zParams.x / (depthNdc + zParams.y);
+                }
+
+                if (depthMeters > _minDepthRange && depthMeters < _maxDepthRange)
+                {
+                    sumDepth += depthMeters;
+                    validCount++;
+                }
+            }
+        }
+
+        if (validCount > 0)
+        {
+            float newDepth = sumDepth / validCount;
+            // 부드럽게 전환 (급격한 변화 방지)
+            TrackedObjectDepth = Mathf.Lerp(TrackedObjectDepth, newDepth, 0.3f);
+        }
     }
 
     private void UpdateSmoothBox(BoundingBox bestBox)
@@ -1016,10 +1090,43 @@ public class IEExecutor : MonoBehaviour
     public void ResetTracking()
     {
         _isTracking = false;
+        _pointCloudCaptured = false;  // 다시 캡처 가능하도록 리셋
+        _previewMode = true;  // Preview 모드로 복귀
         _lockedTargetBox = null;
         _consecutiveLostFrames = 0;
         if (_ieMasker != null) _ieMasker.ClearAllMasks();
         CurrentPointCount = 0;
         Debug.Log("[IEExecutor] Tracking Reset");
+    }
+
+    /// <summary>
+    /// [Step 1] Preview 모드에서 Capture 모드로 전환하여 PointCloud 생성
+    /// A 버튼을 눌렀을 때 호출
+    /// </summary>
+    public void CapturePointCloud()
+    {
+        if (!_isTracking || !_lockedTargetBox.HasValue)
+        {
+            Debug.LogWarning("[IEExecutor] Cannot capture: No target is being tracked");
+            return;
+        }
+
+        if (_pointCloudCaptured)
+        {
+            Debug.Log("[IEExecutor] PointCloud already captured. Press B to reset and try again.");
+            return;
+        }
+
+        _previewMode = false;  // Capture 모드로 전환
+        _pointCloudCaptured = false;  // 다음 프레임에서 캡처되도록
+        Debug.Log("[IEExecutor] Capture mode enabled - PointCloud will be generated next frame");
+    }
+
+    /// <summary>
+    /// [Step 1] 현재 Preview 모드인지 확인하고 Capture 준비 상태 반환
+    /// </summary>
+    public bool IsReadyToCapture()
+    {
+        return _isTracking && _lockedTargetBox.HasValue && !_pointCloudCaptured;
     }
 }

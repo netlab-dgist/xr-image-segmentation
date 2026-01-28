@@ -11,12 +11,6 @@
         {
             "deviceId": "2G0YC5ZHBG000B",
             "name": "com.UnityTechnologies.com.unity.template.urpblank",
-            "processId": 25671,
-            "exited": true
-        },
-        {
-            "deviceId": "2G0YC5ZHBG000B",
-            "name": "com.UnityTechnologies.com.unity.template.urpblank",
             "processId": 26011,
             "exited": true
         },
@@ -42,7 +36,7 @@
             "deviceId": "2G0YC5ZHBG000B",
             "name": "com.UnityTechnologies.com.unity.template.urpblank",
             "processId": 29526,
-            "exited": false
+            "exited": true
         }
     ],
     "m_Tags": {
@@ -99,7 +93,7 @@
         "AutoCapture": true
     },
     "m_FilterOptions": {
-        "m_Filter": "[point",
+        "m_Filter": "",
         "m_UseRegularExpressions": false,
         "m_MatchCase": false
     },

@@ -664,7 +664,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &494786730
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -762,6 +762,7 @@ GameObject:
   - component: {fileID: 560889988}
   - component: {fileID: 560889987}
   - component: {fileID: 560889989}
+  - component: {fileID: 560889990}
   m_Layer: 0
   m_Name: CenterEyeAnchor
   m_TagString: MainCamera
@@ -888,6 +889,20 @@ MonoBehaviour:
     m_MipBias: 0
     m_VarianceClampScale: 0.9
     m_ContrastAdaptiveSharpening: 0
+--- !u!114 &560889990
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 560889985}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 20bc0cd5c0f76624d9f728a41639c12d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _ieExecutor: {fileID: 787607880}
+  _showReticle: 1
 --- !u!1 &568621721
 GameObject:
   m_ObjectHideFlags: 0
@@ -1322,6 +1337,7 @@ GameObject:
   m_Component:
   - component: {fileID: 787607879}
   - component: {fileID: 787607880}
+  - component: {fileID: 787607881}
   m_Layer: 0
   m_Name: IEExecutor
   m_TagString: Untagged
@@ -1358,11 +1374,11 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   _inputSize: {x: 640, y: 640}
-  _backend: 512
+  _backend: 256
   _sentisModel: {fileID: 5022602860645237092, guid: f1c063a466db58649b6fc7b9aa20b30b, type: 3}
   _layersPerFrame: 25
   _confidenceThreshold: 0.5
-  _displayLocation: {fileID: 270828331}
+  DisplayLocation: {fileID: 0}
   _maxLostFrames: 10
   _minIoUThreshold: 0.2
   _minSmoothTime: 0.03
@@ -1374,13 +1390,35 @@ MonoBehaviour:
   _maxPoints: 200000
   _samplingStep: 1
   _subSamplingFactor: 2
-  _pointCloudConfidence: 0.1
+  _pointCloudConfidence: 0.05
   _includeInvalidDepth: 0
   _fallbackDepth: 0.2
   _pointCloudShader: {fileID: 7200000, guid: db8d87a3a4f86af468a8eeef2e58f8cb, type: 3}
   _minDepthRange: 0.1
   _maxDepthRange: 3
+  CalibrationYOffset: 0
+  CalibrationXOffset: 0
+  CalibrationScale: 1
   _ieBoxer: {fileID: 568621722}
+--- !u!114 &787607881
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 787607877}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 594eb8a877e0b2941be0b9608457681b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _ieExecutor: {fileID: 787607880}
+  _overlayDistance: 1.2
+  _maskAlpha: 0.4
+  _currentScale: 0.0015
+  _adjustmentSpeed: 0.001
+  _yOffset: 0
+  _offsetSpeed: 0.5
 --- !u!1 &832575517
 GameObject:
   m_ObjectHideFlags: 0

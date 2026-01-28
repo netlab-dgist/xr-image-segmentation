@@ -65,32 +65,46 @@ public class IEPassthroughTrigger : MonoBehaviour
             _laserLineRenderer.SetPosition(0, rightHand.position);
             _laserLineRenderer.SetPosition(1, rightHand.position + rightHand.forward * 3.0f); // 시각적으로는 3m만 표시
 
-            // B. 트리거 입력 감지 (선택)
+            // B. 트리거 입력 감지 (물체 선택 - Preview 모드 시작)
             // OVRInput.Button.SecondaryIndexTrigger -> 오른쪽 검지 트리거
             if (OVRInput.GetDown(OVRInput.Button.SecondaryIndexTrigger) ||
                 OVRInput.GetDown(OVRInput.Button.PrimaryIndexTrigger, OVRInput.Controller.RTouch))
             {
-                Debug.Log("Right Index Trigger Pressed -> Raycasting...");
+                Debug.Log("Right Index Trigger Pressed -> Select Target (Preview Mode)");
 
                 // 1. 컨트롤러가 가리키는 먼 지점(World Pos) 계산
                 Vector3 targetWorldPoint = rightHand.position + rightHand.forward * _laserLength;
 
                 // 2. 그 지점을 2D 화면 좌표(Screen Pos)로 변환
-                // (카메라가 보고 있는 화면상의 어디에 해당하는지 찾음)
                 Vector3 screenPoint = Camera.main.WorldToScreenPoint(targetWorldPoint);
 
                 // 3. Executor에게 "이 화면 좌표에 있는 물체 찾아줘" 요청
+                // [Step 1] 이제 마스크만 보여주고 PointCloud는 생성하지 않음 (Preview 모드)
                 _ieExecutor.SelectTargetFromScreenPos(screenPoint);
+            }
 
-                // 4. RGBD 디버그 캡처 (선택된 물체의 RGB/Depth 표시)
-                if (_rgbdDebugViewer != null)
+            // C. A 버튼 입력 감지 (PointCloud 캡처)
+            // [Step 1] Preview에서 마스크를 조절한 후 A 버튼으로 캡처
+            if (OVRInput.GetDown(OVRInput.Button.One))
+            {
+                if (_ieExecutor.IsReadyToCapture())
                 {
-                    // 약간의 딜레이 후 캡처 (마스크가 적용된 후)
-                    StartCoroutine(CaptureRGBDDelayed());
+                    Debug.Log("A Button Pressed -> Capture PointCloud");
+                    _ieExecutor.CapturePointCloud();
+
+                    // RGBD 디버그 캡처 (선택된 물체의 RGB/Depth 표시)
+                    if (_rgbdDebugViewer != null)
+                    {
+                        StartCoroutine(CaptureRGBDDelayed());
+                    }
+                }
+                else
+                {
+                    Debug.Log("A Button Pressed -> No target to capture (select with trigger first)");
                 }
             }
 
-            // C. B 버튼 입력 감지 (추적 해제)
+            // D. B 버튼 입력 감지 (추적 해제)
             if (OVRInput.GetDown(OVRInput.Button.Two))
             {
                 Debug.Log("B Button Pressed -> Reset Tracking");

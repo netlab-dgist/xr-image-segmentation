@@ -57,3 +57,95 @@ Passthrough Camera → IEExecutor (Sentis) → YOLOv11-seg → Tracking (IoU) �
 3. [ ] **3D Point 변환**: Camera Intrinsics(fx, fy, cx, cy)를 사용하여 2D 픽셀 + Depth를 3D 월드 좌표로 변환
 4. [ ] **PointCloud 시각화**: 생성된 3D 포인트를 효율적으로 렌더링하기 위한 데이터 구조 및 렌더러 구현
 5. [ ] **Mesh 생성 (Next Stage)**: PointCloud 기반 실시간 Mesh Reconstruction 알고리즘 적용
+
+---
+
+# QuestCameraKit 방식 RGBD Pipeline (2026-01-28 적용)
+
+## 핵심 원리: 좌표계 통일
+
+Quest 3에는 세 가지 서로 다른 카메라/센서가 있음:
+1. **RGB Passthrough Camera (Left)**: 실제 RGB 이미지를 촬영하는 물리적 카메라
+2. **VR CenterEye (Camera.main)**: 사용자가 보는 렌더링 시점
+3. **Environment Depth Sensor**: VR eye 기준으로 깊이를 측정
+
+**문제**: 이 세 가지가 모두 다른 위치/FOV를 가지므로 좌표 변환이 필수
+
+## 적용된 파이프라인
+
+```
+RGB Passthrough Camera
+        ↓
+   YOLO 추론 (640x640)
+        ↓
+   Mask (160x160)
+        ↓
+   Mask 픽셀 → RGB 픽셀 변환
+        ↓
+   RGB Camera Intrinsics로 Ray Direction 계산
+        ↓
+   RGB Camera Pose로 World Space Ray로 변환
+        ↓
+   World Position → _DepthReprojMatrix → Depth 텍스처 UV
+        ↓
+   Depth 샘플링 (Iterative Refinement)
+        ↓
+   RGB Camera Origin + Direction * Depth = World Position
+```
+
+## 핵심 변경 사항
+
+### 1. IEExecutor.ExtractPointCloudGPU()
+- **이전**: VR 카메라(Camera.main) FOV 기반 Intrinsics 사용
+- **현재**: `PassthroughCameraUtils.GetCameraIntrinsics(Left)` 사용
+- **이전**: VR 카메라 Pose 사용
+- **현재**: `PassthroughCameraUtils.GetCameraPoseInWorld(Left)` 사용
+
+### 2. VRMaskOverlay
+- **이전**: Canvas가 Camera.main의 자식으로 설정
+- **현재**: Canvas가 World Space에서 RGB 카메라 Pose를 매 프레임 따라감
+- **결과**: 마스크와 PointCloud가 동일한 RGB 카메라 좌표계에서 동작
+
+### 3. Depth Reprojection
+- `_EnvironmentDepthReprojectionMatrices[0]` (Left eye) 사용
+- World 좌표 → Depth 텍스처 UV 변환
+- Iterative Sampling으로 RGB-Depth 시차 해결
+
+## 주요 유틸리티
+
+### PassthroughCameraUtils (핵심)
+```csharp
+// RGB 카메라의 물리적 파라미터
+GetCameraIntrinsics(PassthroughCameraEye.Left)
+  → FocalLength (fx, fy)
+  → PrincipalPoint (cx, cy)
+  → Resolution
+
+// RGB 카메라의 월드 공간 위치/회전
+GetCameraPoseInWorld(PassthroughCameraEye.Left)
+  → position, rotation
+```
+
+### Depth Shader 수식
+```hlsl
+// World → Depth UV 변환
+float4 depthClip = mul(_DepthReprojMatrix, float4(worldPos, 1.0));
+float2 depthUV = (depthClip.xy / depthClip.w + 1.0) * 0.5;
+
+// NDC → Linear Depth 변환
+float linearDepth = _ZBufferParams.x / (rawDepth * 2.0 - 1.0 + _ZBufferParams.y);
+```
+
+---
+
+# 이전 진단 기록 (해결됨)
+
+## ~~문제 1: UX Flow Issue~~ ✅ 해결
+- Preview(트리거) / Capture(A버튼) 분리 완료
+
+## ~~문제 2: Visual Alignment Mismatch~~ ✅ 해결
+- RGB 카메라 좌표계로 통일
+
+## ~~문제 3: Depth Sampling Error~~ ✅ 해결
+- Depth Discontinuity Filter 적용
+- Iterative Depth Sampling 적용
