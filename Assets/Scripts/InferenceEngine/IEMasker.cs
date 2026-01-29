@@ -14,10 +14,6 @@ public class IEMasker
 
     private float _confidenceThreshold = 0.5f;
 
-    // 외부에서 현재 마스크 텍스처에 접근할 수 있도록 추가
-    private Texture2D _currentMaskTexture;
-    public Texture2D CurrentMaskTexture => _currentMaskTexture;
-
     public IEMasker(Transform displayLocation, float confidenceThreshold)
     {
         _displayLocation = displayLocation;
@@ -63,6 +59,7 @@ public class IEMasker
         ClearMasks(numObjects);
     }
 
+    // [수정됨] 에러가 났던 부분입니다. 네임스페이스를 제거하여 정상 작동하도록 고쳤습니다.
     public void DrawSingleMask(int targetIndex, BoundingBox box, Tensor<float> mask, int imageWidth, int imageHeight)
     {
         ClearMasks(0); 
@@ -97,19 +94,6 @@ public class IEMasker
 
         maskTexture.SetPixels32(pixelArray);
         maskTexture.Apply();
-
-        // 현재 마스크 텍스처 저장
-        _currentMaskTexture = maskTexture;
-    }
-
-    public void KeepCurrentMask()
-    {
-        // 아무것도 하지 않으면 현재 그려진 마스크가 그대로 유지됨
-    }
-
-    public void ClearAllMasks()
-    {
-        ClearMasks(0);
     }
 
     private void ClearMasks(int lastBoxCount)

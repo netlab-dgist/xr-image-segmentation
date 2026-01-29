@@ -11,14 +11,11 @@ public class IEPassthroughTrigger : MonoBehaviour
 
     [Header("Controller Setup")]
     // [중요] 인스펙터에서 OVRCameraRig를 꼭 연결해야 합니다!
-    [SerializeField] private OVRCameraRig _cameraRig;
-
+    [SerializeField] private OVRCameraRig _cameraRig; 
+    
     // 레이저 시각화 (선택 사항)
-    [SerializeField] private LineRenderer _laserLineRenderer;
-    [SerializeField] private float _laserLength = 50.0f;
-
-    [Header("RGBD Debug Viewer")]
-    [SerializeField] private RGBDDebugViewer _rgbdDebugViewer; 
+    [SerializeField] private LineRenderer _laserLineRenderer; 
+    [SerializeField] private float _laserLength = 50.0f; 
 
     private IEnumerator Start()
     {
@@ -67,7 +64,7 @@ public class IEPassthroughTrigger : MonoBehaviour
 
             // B. 트리거 입력 감지 (선택)
             // OVRInput.Button.SecondaryIndexTrigger -> 오른쪽 검지 트리거
-            if (OVRInput.GetDown(OVRInput.Button.SecondaryIndexTrigger) ||
+            if (OVRInput.GetDown(OVRInput.Button.SecondaryIndexTrigger) || 
                 OVRInput.GetDown(OVRInput.Button.PrimaryIndexTrigger, OVRInput.Controller.RTouch))
             {
                 Debug.Log("Right Index Trigger Pressed -> Raycasting...");
@@ -81,13 +78,6 @@ public class IEPassthroughTrigger : MonoBehaviour
 
                 // 3. Executor에게 "이 화면 좌표에 있는 물체 찾아줘" 요청
                 _ieExecutor.SelectTargetFromScreenPos(screenPoint);
-
-                // 4. RGBD 디버그 캡처 (선택된 물체의 RGB/Depth 표시)
-                if (_rgbdDebugViewer != null)
-                {
-                    // 약간의 딜레이 후 캡처 (마스크가 적용된 후)
-                    StartCoroutine(CaptureRGBDDelayed());
-                }
             }
 
             // C. B 버튼 입력 감지 (추적 해제)
@@ -95,28 +85,7 @@ public class IEPassthroughTrigger : MonoBehaviour
             {
                 Debug.Log("B Button Pressed -> Reset Tracking");
                 _ieExecutor.ResetTracking();
-
-                // 디버그 이미지도 초기화
-                if (_rgbdDebugViewer != null)
-                {
-                    _rgbdDebugViewer.ClearDebugImages();
-                }
             }
-        }
-    }
-
-    /// <summary>
-    /// 마스크가 적용된 후 RGBD 캡처 (약간의 딜레이)
-    /// </summary>
-    private IEnumerator CaptureRGBDDelayed()
-    {
-        // 다음 프레임까지 대기 (마스크가 그려진 후)
-        yield return null;
-        yield return null;
-
-        if (_rgbdDebugViewer != null)
-        {
-            _rgbdDebugViewer.CaptureRGBDForTrackedObject();
         }
     }
 }

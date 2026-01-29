@@ -56,7 +56,7 @@ public class IEBoxer : MonoBehaviour
             var centerY = output[n, 1] * scaleY - halfHeight;
 
             // Get object class name
-            var classname = GetClassName(labelIds[n]);
+            var classname = _labels[labelIds[n]].Replace(" ", "_");
 
             // Create a new bounding box
             var box = new BoundingBox
@@ -69,7 +69,7 @@ public class IEBoxer : MonoBehaviour
                 Label = $"{classname}",
             };
 
-            // Debug.Log($"Box {n}: {box.Label} - Center: ({box.CenterX}, {box.CenterY}), Size: ({box.Width}, {box.Height})");
+            Debug.Log($"Box {n}: {box.Label} - Center: ({box.CenterX}, {box.CenterY}), Size: ({box.Width}, {box.Height})");
 
             boundingBoxes.Add(box);
 
@@ -78,11 +78,6 @@ public class IEBoxer : MonoBehaviour
         ClearBoxes(maxBoxes);
 
         return boundingBoxes;
-    }
-
-    public void HideAllBoxes()
-    {
-        ClearBoxes(0);
     }
 
     public void ClearBoxes(int lastBoxCount)
@@ -97,12 +92,6 @@ public class IEBoxer : MonoBehaviour
                 }
             }
         }
-    }
-
-    public string GetClassName(int labelId)
-    {
-        if (_labels == null || labelId < 0 || labelId >= _labels.Length) return "Unknown";
-        return _labels[labelId].Replace(" ", "_");
     }
 
     private void DrawBox(BoundingBox box, int id)
