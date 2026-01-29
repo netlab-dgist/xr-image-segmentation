@@ -28,7 +28,7 @@ public class IEExecutor : MonoBehaviour
     [SerializeField] private Transform _displayLocation;
 
     [Header("Natural Tracking Settings")]
-    [SerializeField] private int _maxLostFrames = 15; // [상향] 가려졌을 때 더 오래 버티도록 10 -> 15 프레임으로 늘림
+    [SerializeField] private int _maxLostFrames = 15; 
     [SerializeField] private float _minIoUThreshold = 0.3f;
     
     // 적응형 스무딩 범위
@@ -38,7 +38,10 @@ public class IEExecutor : MonoBehaviour
     
     public bool IsModelLoaded { get; private set; } = false;
 
+    [Header("Dependencies")]
     [SerializeField] private IEBoxer _ieBoxer;
+    [SerializeField] private IEInferenceToWorld _inferenceToWorld; 
+    [SerializeField] private IEVisualizer _markerVisualizer; 
 
     private IEMasker _ieMasker;
     private Worker _inferenceEngineWorker;
@@ -242,6 +245,27 @@ public class IEExecutor : MonoBehaviour
                     WorldPos = bestBox.WorldPos
                 };
 
+                // [Calculate World Position]
+                if (_inferenceToWorld != null)
+                {
+                    Vector2 pixelPos = new Vector2(
+                        smoothedPos.x + _inputSize.x / 2f,
+                        smoothedPos.y + _inputSize.y / 2f
+                    );
+
+                    Vector3 estimatedWorldPos = _inferenceToWorld.GetWorldPositionFromRGB(
+                        pixelPos, 
+                        _inputSize.x, 
+                        _inputSize.y
+                    );
+                    
+                    if (estimatedWorldPos != Vector3.zero)
+                    {
+                        Debug.Log($"[IEExecutor] Tracked Object '{bestBox.ClassName}' World Pos: {estimatedWorldPos}");
+                        if (_markerVisualizer != null) _markerVisualizer.UpdateMarker(estimatedWorldPos, bestBox.ClassName);
+                    }
+                }
+
                 // 새로운 마스크 그리기
                 _ieMasker.DrawSingleMask(bestIndex, bestBox, _output3MaskWeights, _inputSize.x, _inputSize.y);
             }
@@ -250,33 +274,8 @@ public class IEExecutor : MonoBehaviour
                 // [실패] 물체를 놓침 (가려짐 등)
                 _consecutiveLostFrames++;
                 
-                if (_consecutiveLostFrames <= _maxLostFrames)
+                if (_consecutiveLostFrames > _maxLostFrames)
                 {
-                    // [핵심 변경 사항]
-                    // 놓쳤더라도 허용 범위 내라면, 마스크를 지우지 않습니다.
-                    // 이전에 그려진 마스크(RawImage Texture)가 그대로 화면에 남아서 "유지"되는 효과를 줍니다.
-                    // _ieMasker.DrawSingleMask(-1, ...) <--- 이 코드를 제거했습니다.
-
-                    // 박스 위치는 관성에 따라 계속 예측 이동 (내부 데이터만 갱신)
-                    float deltaTime = Time.deltaTime; 
-                    float predX = _lockedTargetBox.Value.CenterX + (_centerVelocity.x * deltaTime);
-                    float predY = _lockedTargetBox.Value.CenterY + (_centerVelocity.y * deltaTime);
-                    _centerVelocity *= 0.9f; 
-
-                    _lockedTargetBox = new BoundingBox
-                    {
-                        CenterX = predX,
-                        CenterY = predY,
-                        Width = _lockedTargetBox.Value.Width,
-                        Height = _lockedTargetBox.Value.Height,
-                        ClassName = _lockedTargetBox.Value.ClassName,
-                        Label = _lockedTargetBox.Value.Label,
-                        WorldPos = _lockedTargetBox.Value.WorldPos
-                    };
-                }
-                else
-                {
-                    // 너무 오래 놓치면 그때 리셋 (마스크 사라짐)
                     Debug.Log("Tracking Lost (Timeout)");
                     ResetTracking();
                 }
@@ -284,8 +283,9 @@ public class IEExecutor : MonoBehaviour
         }
         else
         {
-            // 애초에 추적 중이 아니면 마스크 지우기
+            // 애초에 추적 중이 아니면 리셋
             _ieMasker.DrawSingleMask(-1, default, null, _inputSize.x, _inputSize.y);
+            if (_markerVisualizer != null) _markerVisualizer.HideMarker();
         }
     }
 
@@ -348,6 +348,8 @@ public class IEExecutor : MonoBehaviour
         
         if (_ieMasker != null) 
              _ieMasker.DrawSingleMask(-1, default, null, _inputSize.x, _inputSize.y);
+        
+        if (_markerVisualizer != null) _markerVisualizer.HideMarker();
         
         Debug.Log("[IEExecutor] Tracking Reset");
     }

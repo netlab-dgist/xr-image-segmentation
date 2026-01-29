@@ -1,0 +1,37 @@
+# XR Image Segmentation Alignment Plan
+
+## Goal
+Align the 2D YOLO bounding boxes (from RGB Camera) with the 3D Real World (Depth/Passthrough) so that interactions and depth estimation are accurate.
+
+## Current Suspect
+There is a high probability of a coordinate mismatch between:
+1. **Inference Resolution:** 640x640 (Square)
+2. **WebCamTexture Resolution:** Unknown (Likely non-square, e.g., 1920x1080 or similar)
+3. **Screen Resolution:** The headset's display resolution (Binocular)
+4. **Camera Intrinsics:** The physical camera's FOV vs. Unity's Virtual Camera FOV.
+
+## Step-by-Step Debugging Plan
+
+### Step 1: Visual Debugging of "Screen Space" (The 2D Alignment)
+Before worrying about depth (Z-axis), we must ensure X and Y are correct.
+*   **Action:** Create a `CoordinateDebugger` script.
+*   **Visual:** Draw a small Red Circle on the UI Canvas at the exact screen coordinates where YOLO thinks the object center is.
+*   **Test:** Look at a real object (e.g., the Bus or a person). Does the Red Circle sit exactly on the center of the object?
+    *   *If offset:* We need to fix the mapping from `640x640` -> `Screen.width/height`.
+    *   *If drifting when head moves:* We have a latency/timestamp2 issue.
+
+### Step 2: Controller Raycast Verification
+Currently, `IEPassthroughTrigger` uses `Camera.main.WorldToScreenPoint`.
+*   **Action:** In `CoordinateDebugger`, draw a Green Crosshair where the Controller Ray hits the "Screen".
+*   **Test:** Point your controller at an object. Does the Green Crosshair appear exactly where you are pointing?
+    *   *If not:* Unity's Camera parameters do not match the Passthrough projection.
+
+### Step 3: Depth Integration (The 3D Alignment)
+Once Step 1 & 2 align (Red Circle is on object, Green Crosshair is on pointer), we verify depth.
+*   **Action:** Use `Environment Depth` to sample the real distance at the "Red Circle" screen coordinates.
+*   **Visual:** Place a 3D Sphere at that derived world position.
+*   **Test:** Does the sphere stay "glued" to the real-world object as you walk around?
+
+## Next Immediate Action
+I will generate the `CoordinateDebugger.cs` script to perform Step 1 and Step 2.
+This script will overlay simple UI elements to diagnose the offset.
