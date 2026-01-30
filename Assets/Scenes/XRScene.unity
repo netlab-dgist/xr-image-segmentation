@@ -1361,7 +1361,7 @@ MonoBehaviour:
   _backend: 512
   _sentisModel: {fileID: 5022602860645237092, guid: f1c063a466db58649b6fc7b9aa20b30b, type: 3}
   _layersPerFrame: 25
-  _confidenceThreshold: 0.5
+  _confidenceThreshold: 0.3
   _displayLocation: {fileID: 270828331}
   _maxLostFrames: 10
   _minIoUThreshold: 0.2

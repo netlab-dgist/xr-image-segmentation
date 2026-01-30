@@ -38,6 +38,9 @@ float _MaxDepth;
 // Depth conversion params (from Meta SDK)
 float4 _DepthZBufferParams;   // x=invDepthFactor, y=depthOffset
 
+// [FIX] Depth가 이미 선형화(미터)인지 여부 (1=already linear, 0=needs NDC conversion)
+int _IsDepthAlreadyLinear;
+
 // Depth reprojection matrix (Not used in simple mode, but kept for compatibility)
 float4x4 _DepthReprojMatrix;
 
@@ -81,8 +84,8 @@ int2 MaskToRGBPixel(float maskX, float maskY, float4 bbox, int rgbW, int rgbH)
     
     float texV = boxBottomV + v * (boxTopV - boxBottomV);
 
-    // [보정] Manual Y-axis offset: Shift UP by 10%
-    texV += 0.1;
+    // [FIX] 하드코딩 오프셋 제거 - 좌표계 문제가 해결되면 불필요
+    // texV += 0.1;
 
     int pixelX = (int)(texU * (float)rgbW);
     int pixelY = (int)(texV * (float)rgbH);
@@ -107,26 +110,35 @@ float SampleDepthSimple(int2 rgbPixel, int rgbW, int rgbH)
     // Sample from slice 0 (left eye)
     float rawDepth = _DepthTexture[int3(dx, dy, 0)];
 
-    // Convert to linear depth
+    // [FIX] _PreprocessedEnvironmentDepthTexture는 이미 미터 단위이므로 변환 불필요
+    if (_IsDepthAlreadyLinear == 1)
+    {
+        return rawDepth;
+    }
+
+    // _EnvironmentDepthTexture (R16_UNorm)는 NDC 변환 필요
     float depthNdc = rawDepth * 2.0 - 1.0;
     float linearDepth = _DepthZBufferParams.x / (depthNdc + _DepthZBufferParams.y);
 
     return linearDepth;
 }
 
-// Hole Filling Depth Sampling
-// If center depth is invalid, search 3x3 neighborhood for a valid depth
+// Hole Filling Depth Sampling with Outlier Removal (Trimmed Mean)
+// If center depth is invalid, search neighborhood and use trimmed mean
 float SampleDepthFilled(int2 rgbPixel, int rgbW, int rgbH)
 {
     // 1. Center sample
     float d = SampleDepthSimple(rgbPixel, rgbW, rgbH);
     if (d >= _MinDepth && d <= _MaxDepth) return d;
 
-    // 2. Neighbor search (Spiral or simple grid)
-    // 3x3 search (radius 1)
-    const int radius = 2; 
+    // 2. Neighbor search with outlier removal
+    const int radius = 2;
+
+    // [FIX] GPU에서 정렬 대신 Trimmed Mean 사용: min/max 제외 후 평균
     float sumDepth = 0.0;
     float validCount = 0.0;
+    float minVal = 1e10;
+    float maxVal = -1e10;
 
     for (int y = -radius; y <= radius; y++)
     {
@@ -136,18 +148,29 @@ float SampleDepthFilled(int2 rgbPixel, int rgbW, int rgbH)
 
             int2 neighbor = rgbPixel + int2(x, y);
             float nd = SampleDepthSimple(neighbor, rgbW, rgbH);
-            
+
             if (nd >= _MinDepth && nd <= _MaxDepth)
             {
                 sumDepth += nd;
                 validCount += 1.0;
+                minVal = min(minVal, nd);
+                maxVal = max(maxVal, nd);
             }
         }
     }
 
-    if (validCount > 0.0)
+    // [FIX] Trimmed Mean: 유효 샘플이 3개 이상이면 min/max 제외
+    if (validCount >= 3.0)
     {
-        return sumDepth / validCount; // Average of valid neighbors
+        // min과 max를 한 번씩 제외
+        sumDepth -= minVal;
+        sumDepth -= maxVal;
+        validCount -= 2.0;
+        return sumDepth / validCount;
+    }
+    else if (validCount > 0.0)
+    {
+        return sumDepth / validCount;
     }
 
     return -1.0; // Failed to fill
@@ -173,8 +196,8 @@ void ExtractPointCloud(uint3 id : SV_DispatchThreadID)
     // [수정] Hole Filling 적용
     float depthMeters = SampleDepthFilled(rgbPixel, _RGBWidth, _RGBHeight);
 
-    // [보정] Depth Offset: 포인트가 너무 앞에 나오므로 뒤로 0.1m 밈
-    depthMeters += 0.1;
+    // [FIX] 하드코딩 depth 오프셋 제거 - 이중 선형화 버그 수정으로 불필요
+    // depthMeters += 0.1;
 
     if (depthMeters < _MinDepth)
     {

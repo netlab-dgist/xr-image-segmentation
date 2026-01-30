@@ -645,7 +645,11 @@ public class IEExecutor : MonoBehaviour
                     _pointCloudShader.SetInt("_MaxPoints", _maxPoints);
                     _pointCloudShader.SetFloat("_MinDepth", _minDepthRange);
                     _pointCloudShader.SetFloat("_MaxDepth", _maxDepthRange);
-        
+
+                    // [FIX] _PreprocessedEnvironmentDepthTexture 사용 시 이미 선형화된 depth
+                    bool isAlreadyLinear = Shader.GetGlobalTexture("_PreprocessedEnvironmentDepthTexture") != null;
+                    _pointCloudShader.SetInt("_IsDepthAlreadyLinear", isAlreadyLinear ? 1 : 0);
+
                     // 8. 버퍼 바인딩
                     _pointCloudShader.SetTexture(_kernelId, "_DepthTexture", depthRT);
                     _pointCloudShader.SetBuffer(_kernelId, "_MaskBuffer", _maskBuffer);
@@ -699,6 +703,13 @@ public class IEExecutor : MonoBehaviour
         // 비동기 RGB 데이터가 준비되지 않았으면 스킵
         if (!_rgbDataReady || _cpuDepthTex == null) return;
         if (_rgbPixelCache == null || _rgbPixelCache.Length == 0) return;
+
+        // [FIX] Bounds checking for mask tensor
+        if (_output3MaskWeights == null || targetIndex < 0 || targetIndex >= _output3MaskWeights.shape[0])
+        {
+            Debug.LogWarning($"[IEExecutor] Invalid targetIndex: {targetIndex}, mask shape: {_output3MaskWeights?.shape}");
+            return;
+        }
 
         // 카메라 intrinsics 캐싱
         if (!_intrinsicsCached)
@@ -761,10 +772,14 @@ public class IEExecutor : MonoBehaviour
                         Vector2Int rgbPixel = MapMaskToRGBPixelFloat(x, y, box, rgbW, rgbH);
                         float u = (float)rgbPixel.x / rgbW;
                         float v = (float)rgbPixel.y / rgbH;
-                        int dx = Mathf.FloorToInt(u * (depthW - 1));
-                        int dy = Mathf.FloorToInt(v * (depthH - 1));
-                        
-                        float rawDepth = depthData[dy * depthW + dx];
+                        int dx = Mathf.Clamp(Mathf.FloorToInt(u * (depthW - 1)), 0, depthW - 1);
+                        int dy = Mathf.Clamp(Mathf.FloorToInt(v * (depthH - 1)), 0, depthH - 1);
+
+                        // [FIX] Bounds checking for depth data
+                        int depthIdx = dy * depthW + dx;
+                        if (depthIdx < 0 || depthIdx >= depthData.Length) continue;
+
+                        float rawDepth = depthData[depthIdx];
                         float d;
                         if (isAlreadyLinear)
                         {
@@ -821,10 +836,14 @@ public class IEExecutor : MonoBehaviour
 
                             float u = (float)rgbPixel.x / rgbW;
                             float v = (float)rgbPixel.y / rgbH;
-                            int dx = Mathf.FloorToInt(u * (depthW - 1));
-                            int dy = Mathf.FloorToInt(v * (depthH - 1));
-                            
-                            float rawDepth = depthData[dy * depthW + dx];
+                            int dx = Mathf.Clamp(Mathf.FloorToInt(u * (depthW - 1)), 0, depthW - 1);
+                            int dy = Mathf.Clamp(Mathf.FloorToInt(v * (depthH - 1)), 0, depthH - 1);
+
+                            // [FIX] Bounds checking for depth data
+                            int depthIdx = dy * depthW + dx;
+                            if (depthIdx < 0 || depthIdx >= depthData.Length) continue;
+
+                            float rawDepth = depthData[depthIdx];
                             float depthMeters;
 
                             if (isAlreadyLinear)
@@ -898,8 +917,8 @@ public class IEExecutor : MonoBehaviour
         float boxTopV = 0.5f - (bboxCenterY_Norm - bboxH_Norm * 0.5f);
         float texV = boxBottomV + v * (boxTopV - boxBottomV);
 
-        // [보정] 위로 10% 올리기
-        texV += 0.1f;
+        // [FIX] 하드코딩 오프셋 제거
+        // texV += 0.1f;
 
         int pixelX = Mathf.RoundToInt(texU * rgbW);
         int pixelY = Mathf.RoundToInt(texV * rgbH);
@@ -926,8 +945,8 @@ public class IEExecutor : MonoBehaviour
         float boxTopV = 0.5f - (bboxCenterY_Norm - bboxH_Norm * 0.5f);
         float texV = boxBottomV + v * (boxTopV - boxBottomV);
 
-        // [보정] 위로 10% 올리기
-        texV += 0.1f;
+        // [FIX] 하드코딩 오프셋 제거
+        // texV += 0.1f;
 
         int pixelX = Mathf.RoundToInt(texU * rgbW);
         int pixelY = Mathf.RoundToInt(texV * rgbH);
